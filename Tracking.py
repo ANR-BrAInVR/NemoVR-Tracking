@@ -1819,11 +1819,31 @@ class UIController(QWidget):
     def __init__(self, trackInst):
         """Constructor"""
 
-        super().__init__()
+        # Get log object
         self.log = trackInst.log
         self.log.LogText(1, 'UIController() called')
+
+        # UI shared controller vars
         UImode = trackInst.settings.controller == 'UI'
+        if UIController:
+            self.expID = trackInst.expID
+            self.subjectID = trackInst.subjectID
+            self.trialID = trackInst.subjectID
+            self.condID = trackInst.subjectID
+        self.speciesName = trackInst.speciesName
+        self.runDetect = trackInst.runDetect
+        self.runDLC = trackInst.runDLC
+        self.triangulate = trackInst.triangulate
+        self.showPos2D = trackInst.showPos2D
+        self.showDLC = trackInst.showDLC
+        self.useCyclop = trackInst.useCyclop
+        self.sendPos3D = trackInst.sendPos3D
+        self.saveResults = trackInst.saveResults
+        self.imgModes = manager.list(self.settings.imgModes)       # Image monitoring modes (2 max among full, crop, thresh, morph depending on detector)
+
         self.trackInst = trackInst
+
+        super().__init__()
 
         # Load section UIs
         prevY = self.SystemSettingsUI(posX=10, posY=0, UImode=UImode)

@@ -46,86 +46,21 @@ TCPserverTracking = (IP['Tracking'], 65432)
 UDPpacketSize = 65000   # Size of UDP packets
 TCPpacketSize = 4096    # Size of TCP packets
 
-# Camera settings
-camCountMax = 2                             # Used to allocate memory
+# Image global settings (color images)
+imgWidth, imgHeight = 1280, 1024
 
-# Image global settings (color images now)
-imgWidth = 1280
-imgHeight = 1024
-
-# Global control flags (communication between processes)
-startRequest = mp.Value('B', False)             # Start video acquisition when True
-expStarted = mp.Value('B', False)               # Experiment started when True (acquiring images and monitoring)
-trialStarted = mp.Value('B', False)             # Trial started when True
-stopRequest = mp.Value('B', False)              # stop video acquisition when True
-quit = mp.Value('B', False)                     # Quit program when True
-dataRecording = mp.Value('B', False)            # Start/stop recording data when True/False
-serverRunning = mp.Value('B', False)            # TCP server on/off when True/False (used to launch the GUI)
-acquiring = mp.Array('B', [False] * camCountMax)        # Acquiring when True (for each camera)
-detectRunning = mp.Array('B', [False] * camCountMax)    # Detection running on all cameras (simple or blob detector)
-DLCrunning = mp.Value('B', False)                       # DLC inferences running on all cameras
-syncRequest = mp.Array('B', [False] * camCountMax)      # Synch request (reset startIndexes) when True (for each camera)
-newRefRequest = mp.Array('B', [False] * camCountMax)    # Request new reference images when True (for each camera)
-
-# Manager to share lists of objects across processes and threads
-manager = mp.Manager()
-
-# Events
-# eventString = manager.Value(c_wchar_p, '')              # String containing the last event to be stored with results
-
-# Images streamed between processes
-imgCrops = manager.list([None] * camCountMax)       # 2 cropped images, one per camera
-imgMonits = manager.list([None] * camCountMax * 2)  # Monitoring images for upper [0,1] / lower [2,3] panel for camera pairs
-imgIndexes = mp.Array('l', [-1] * camCountMax)      # Index of last image received in each camera (stream)
-
-# Detected 2D positions of fishes in each camera (10 to ensure we have enough)
-pos2Ds = manager.list([np.zeros((10, 2))] * camCountMax)    # Detected 2D positions of fishes for each camera (in full image coordinates)
-nFishDetect2D = mp.Array('H', [0] * camCountMax)            # Number of detected fishes for each camera (2D pos)
-
-# Triangulated 3D position of animal
-pos3Ds = manager.list([np.zeros((10, 3))])      # Fish 3D positions triangulated from valid pos2Ds of each camera (in aquarium coordinates)
-nFishDetect3D = mp.Value('H', 0)                # Number of detected fishes for each camera (2D pos)
-imgIndexPos3D = mp.Value('l', -1)               # Index of cam0 image from which pos2D has been triangulated
+# DLC key variables
+nKeysMax = 20  # Maximal number of keys detected by DLC
+keyRadius = 3  # Maximal radius size of the keys for monitoring (when inference p=1)
+cyclopRadius = 4  # Maximal radius size of cyclop for monitoring (when inference p=1)
+cyclopColor = 0  # Detection or cyclop key center color (white)
 
 # Stores all possible pair combinations, between cameras (triangulation) or from one camera frame to the next (identification)
 pairLists = []
 
-# DLC key variables
-nKeysMax = 20               # Maximal number of keys detected by DLC
-keyRadius = 3               # Maximal radius size of the keys for monitoring (when inference p=1)
-cyclopRadius = 4            # Maximal radius size of cyclop for monitoring (when inference p=1)
-cyclopColor = 0             # Detection or cyclop key center color (white)
-
-pos2D_cyclop = manager.list([np.zeros(3)] * camCountMax)       # Computed cyclop 2D positions for each camera (needs DLC activated, in full image coordinates)
-pos3D_cyclop = manager.list([np.zeros(4)])                     # Triangulated cyclop 3D positions (X, Y, Z, pMean) (in aquarium coordinates)
-
-pos2Ds_DLC = manager.list([np.zeros((nKeysMax, 3))] * camCountMax)  # 2D positions and confidence (X, Y, p) of each inferred key (in full image coordinates)
-imgIndexes_DLC = manager.list([0] * camCountMax)                 # Index of image from which keys have been inferred
-
-# Triangulated DLC inferred keys
-pos3Ds_DLC = manager.list([np.zeros((nKeysMax, 4))])    # Triangulated 3D positions (X, Y, Z, pMean) of each inferred pair (in aquarium coordinates)
-imgIndexPos3D_DLC = mp.Value('l', -1)                # Index of cam0 image from which DLC keys have been inferred
-
-# Trial infos for results directory and filename of results, and to update UI
-expID = manager.Value(c_wchar_p, 'exp')
-subjectID = manager.Value(c_wchar_p, 'subj')
-trialID = manager.Value(c_wchar_p, 'trial')
-condID = manager.Value(c_wchar_p, 'cond')
-recVideos = mp.Value('B', True)
-saveResults = mp.Value('B', True)
-
-# UI shared controller vars
-speciesName = manager.Value(c_wchar_p, 'Clownfish')
-runDetect = mp.Value('B', True)
-runDLC = mp.Value('B', True)
-triangulate = mp.Value('B', True)
-showPos2D = mp.Value('B', True)
-useCyclop = mp.Value('B', True)
-showDLC = mp.Value('B', True)
-sendPos3D = mp.Value('B', True)
-saveResults = mp.Value('B', True)
-imgModes = manager.list(['crop', 'diff'])       # Image monitoring modes (2 max among full, crop, thresh, morph depending on detector)
-
+# Settings place holder
+class Settings:
+    owner = None
 
 # Tracking that detects 2D positions of fish for each camera, triangulates and runs DLC on cropped images
 class Tracking:
@@ -140,30 +75,84 @@ class Tracking:
 
         # Load settings and set important parameters
         self.LoadSettings()
+        self.camCount = len(self.camList)
+
+        # Global control flags (communication between processes)
+        self.startRequest = mp.Value('B', False)             # Start video acquisition when True
+        self.expStarted = mp.Value('B', False)               # Experiment started when True (acquiring images and monitoring)
+        self.trialStarted = mp.Value('B', False)             # Trial started when True
+        self.stopRequest = mp.Value('B', False)              # stop video acquisition when True
+        self.quit = mp.Value('B', False)                     # Quit program when True
+        self.dataRecording = mp.Value('B', False)            # Start/stop recording data when True/False
+        self.serverRunning = mp.Value('B', False)            # TCP server on/off when True/False (used to launch the GUI)
+        self.acquiring = mp.Array('B', [False] * self.camCount)        # Acquiring when True (for each camera)
+        self.detectRunning = mp.Array('B', [False] * self.camCount)    # Detection running on all cameras (simple or blob detector)
+        self.DLCrunning = mp.Value('B', False)                       # DLC inferences running on all cameras
+        self.syncRequest = mp.Array('B', [False] * self.camCount)      # Synch request (reset startIndexes) when True (for each camera)
+        self.newRefRequest = mp.Array('B', [False] * self.camCount)    # Request new reference images when True (for each camera)
+        
+        # Manager to share lists of objects across processes and threads
+        manager = mp.Manager()
+        
+        # Images streamed between processes
+        self.imgCrops = manager.list([None] * self.camCount)       # 2 cropped images, one per camera
+        self.imgMonits = manager.list([None] * self.camCount * 2)  # Monitoring images for upper [0,1] / lower [2,3] panel for camera pairs
+        self.imgIndexes = mp.Array('l', [-1] * self.camCount)      # Index of last image received in each camera (stream)
+        
+        # Detected 2D positions of fishes in each camera (10 to ensure we have enough)
+        self.pos2Ds = manager.list([np.zeros((10, 2))] * self.camCount)    # Detected 2D positions of fishes for each camera (in full image coordinates)
+        self.nFishDetect2D = mp.Array('H', [0] * self.camCount)            # Number of detected fishes for each camera (2D pos)
+        
+        # Triangulated 3D position of animal
+        self.pos3Ds = manager.list([np.zeros((10, 3))])      # Fish 3D positions triangulated from valid pos2Ds of each camera (in aquarium coordinates)
+        self.nFishDetect3D = mp.Value('H', 0)                # Number of detected fishes for each camera (2D pos)
+        self.imgIndexPos3D = mp.Value('l', -1)               # Index of cam0 image from which pos2D has been triangulated
+        
+        # DLC key variables
+        self.pos2D_cyclop = manager.list([np.zeros(3)] * self.camCount)       # Computed cyclop 2D positions for each camera (needs DLC activated, in full image coordinates)
+        self.pos3D_cyclop = manager.list([np.zeros(4)])                     # Triangulated cyclop 3D positions (X, Y, Z, pMean) (in aquarium coordinates)
+        
+        self.pos2Ds_DLC = manager.list([np.zeros((nKeysMax, 3))] * self.camCount)  # 2D positions and confidence (X, Y, p) of each inferred key (in full image coordinates)
+        self.imgIndexes_DLC = manager.list([0] * self.camCount)                 # Index of image from which keys have been inferred
+        
+        # Triangulated DLC inferred keys
+        self.pos3Ds_DLC = manager.list([np.zeros((nKeysMax, 4))])    # Triangulated 3D positions (X, Y, Z, pMean) of each inferred pair (in aquarium coordinates)
+        self.imgIndexPos3D_DLC = mp.Value('l', -1)                # Index of cam0 image from which DLC keys have been inferred
+        
+        # Trial infos for results directory and filename of results, and to update UI
+        self.expID = manager.Value(c_wchar_p, 'exp')
+        self.subjectID = manager.Value(c_wchar_p, 'subj')
+        self.trialID = manager.Value(c_wchar_p, 'trial')
+        self.condID = manager.Value(c_wchar_p, 'cond')
+        self.recVideos = mp.Value('B', True)
+        self.saveResults = mp.Value('B', True)
+        
+        # UI shared controller vars
+        self.speciesName = manager.Value(c_wchar_p, self.settings.speciesName)
+        self.runDetect = mp.Value('B', self.settings.runDetect)
+        self.runDLC = mp.Value('B', self.settings.runDLC)
+        self.triangulate = mp.Value('B', self.settings.triangulate)
+        self.showPos2D = mp.Value('B', self.settings.showPos2D)
+        self.showDLC = mp.Value('B', self.settings.showDLC)
+        self.useCyclop = mp.Value('B', self.settings.useCyclop)
+        self.sendPos3D = mp.Value('B', self.settings.sendPos3D)
+        self.saveResults = mp.Value('B', self.settings.saveResults)
+        self.imgModes = manager.list(self.settings.imgModes)       # Image monitoring modes (2 max among full, crop, thresh, morph depending on detector)
+
+        # Run sanity check for newly loaded settings
+        self.CheckSettings(atLoad=True)
 
         # Initialize images for monitoring
         self.imgCropDim = (self.cropSize[1], self.cropSize[0], 3)
-        imgCrops[:self.camCount] = [np.zeros(self.imgCropDim, 'uint8')] * self.camCount
-        imgIndexes[:self.camCount] = [0] * self.camCount
-
-        # Global control flags
-        serverRunning.value = False
-        expStarted.value = False
-        trialStarted.value = False
-        startRequest.value = False
-        stopRequest.value = False
-        quit.value = False
-        acquiring[:self.camCount] = [False] * self.camCount
-        syncRequest[:self.camCount] = [False] * self.camCount
-        newRefRequest[:self.camCount] = [False] * self.camCount
-        dataRecording.value = False
+        self.imgCrops[:self.camCount] = [np.zeros(self.imgCropDim, 'uint8')] * self.camCount
+        self.imgIndexes[:self.camCount] = [0] * self.camCount
 
         # Starts TCP server to receive commands from Rendering PC
         TCPserverThread = threading.Thread(target=self.TCPserver, args=())
         TCPserverThread.start()
 
         # Waits TCP server to be up and running
-        while not serverRunning.value: pass
+        while not self.serverRunning.value: pass
         time.sleep(0.1)
 
         # Starts GUI
@@ -172,11 +161,11 @@ class Tracking:
         self.log.LogText(2, 'Tracking: GUI process started')
 
         while True:
-            # self.log.LogText(2, 'Tracking: %d' % startRequest.value)
+            # self.log.LogText(2, 'Tracking: %d' % self.startRequest.value)
 
-            if startRequest.value:
-                startRequest.value = False
-                if expStarted.value:
+            if self.startRequest.value:
+                self.startRequest.value = False
+                if self.expStarted.value:
                     self.log.LogText(2, 'Tracking: start request received but ignored (already started)')
                 else:
                     self.log.LogText(2, 'Tracking: start request received')
@@ -184,11 +173,11 @@ class Tracking:
                     # Starts tracking
                     self.Start()
 
-            if stopRequest.value:
-                if not expStarted.value:
+            if self.stopRequest.value:
+                if not self.expStarted.value:
                     self.log.LogText(2, 'Tracking: stop request received but ignored (not started)')
                     time.sleep(0.2)
-                    stopRequest.value = False
+                    self.stopRequest.value = False
                 else:
                     self.log.LogText(2, 'Tracking: stop request received')
                     time.sleep(0.2)
@@ -197,14 +186,14 @@ class Tracking:
                     cv2.destroyAllWindows()
 
                     # Back to idle status (all unnecessary threads and processes are closed now)
-                    acquiring[:self.camCount] = [False] * self.camCount
-                    expStarted.value = False
-                    trialStarted.value = False
-                    stopRequest.value = False
-                    startRequest.value = False
+                    self.acquiring[:self.camCount] = [False] * self.camCount
+                    self.expStarted.value = False
+                    self.trialStarted.value = False
+                    self.stopRequest.value = False
+                    self.startRequest.value = False
                     self.log.LogText(2, 'Tracking: waiting for start request')
 
-            if quit.value:
+            if self.quit.value:
                 self.log.LogText(2, 'Tracking: quit request received')
                 break
 
@@ -227,20 +216,20 @@ class Tracking:
 
         self.log.LogText(1, 'LoadSettings() called')
 
-        # Gets settings
-        self.LoadSettingsFile('System settings')
-        self.LoadSettingsFile('Camera settings')
-        self.LoadSettingsFile('Detection settings - %s' % speciesName.value)
-        self.nKeys = len(self.keyNames)  # Number of inferred keys by DLC
+        # System settings place-holder
+        self.settings = Settings()
 
-        # Run sanity check for newly loaded settings
-        self.CheckSettings(atLoad=True)
+        # Gets settings
+        self.LoadSettingsFile('System settings', storeVariable='self.settings')
+        self.LoadSettingsFile('Camera settings')
+        # self.LoadSettingsFile('Detection settings - %s' % self.speciesName.value)
+        # self.nKeys = len(self.keyNames)  # Number of inferred keys by DLC
+        self.log.logLevel = self.settings.logLevel  # Updates log level
 
     def LoadSettingsFile(self, settingsName, storeVariable='self'):
         """Loads specific settings to self or another object's attributes"""
 
-        path = 'Settings/'
-        fname = path + settingsName + '.txt'
+        fname = os.path.join('Settings', settingsName + '.txt')
         if not os.path.isfile(fname):
             return
 
@@ -252,9 +241,6 @@ class Tracking:
                     continue
                 exec("{}.{}={}".format(storeVariable, *settingArgs))
 
-        if settingsName == 'System settings':
-            self.log.logLevel = self.logLevel  # Updates log level
-
         self.log.LogText(2, '"%s" loaded' % settingsName)
 
 
@@ -265,24 +251,24 @@ class Tracking:
 
         if atLoad:
             # Loads settings to UI shared controller vars
-            speciesName.value = self.speciesName
-            runDetect.value = self.runDetect
-            runDLC.value = self.runDLC
-            triangulate.value = self.triangulate
-            showPos2D.value = self.showPos2D
-            useCyclop.value = self.useCyclop
-            showDLC.value = self.showDLC
-            sendPos3D.value = self.sendPos3D
-            imgModes[:] = self.imgModes
-            saveResults.value = self.saveResults
-        else:
-            self.LoadSettingsFile(self, 'Detection settings - %s' % speciesName.value)
-            self.nKeys = len(self.keyNames)  # Number of inferred keys by DLC
+            self.speciesName.value = self.settings.speciesName
+            self.runDetect.value = self.settings.runDetect
+            self.runDLC.value = self.settings.runDLC
+            self.triangulate.value = self.settings.triangulate
+            self.showPos2D.value = self.settings.showPos2D
+            self.useCyclop.value = self.settings.useCyclop
+            self.showDLC.value = self.settings.showDLC
+            self.sendPos3D.value = self.settings.sendPos3D
+            self.imgModes[:] = self.settings.imgModes
+            self.saveResults.value = self.settings.saveResults
+
+        self.LoadSettingsFile('Detection settings - %s' % self.speciesName.value)
+        self.nKeys = len(self.keyNames)  # Number of inferred keys by DLC
 
         # Update camCount, trial infos and system infos
         self.camCount = len(self.camList)
 
-        if runDetect.value:
+        if self.runDetect.value:
             # Force simple detector
             self.camCount = len(self.camList)
             self.simpleDetector = (self.forceSimpeDetector and self.nFish == 1)
@@ -297,74 +283,74 @@ class Tracking:
 
         # If single camera
         if self.camCount == 1:
-            if triangulate.value:
+            if self.triangulate.value:
                 self.log.LogText(2, 'CheckSettings: triangulation requested but only one camera is active, ignoring')
-                triangulate.value = False
-                sendPos3D.value = False
+                self.triangulate.value = False
+                self.sendPos3D.value = False
 
         if self.nFish > 1:
-            sendPos3D.value = False
+            self.sendPos3D.value = False
 
-        if not runDLC.value:
-            useCyclop.value = False
+        if not self.runDLC.value:
+            self.useCyclop.value = False
 
         # Monitoring modes compatibility
 
         # If full image requested, it must be in mode[0]
-        if imgModes[1] == 'full':
+        if self.imgModes[1] == 'full':
             self.log.LogText(2, 'CheckSettings: only upper panel can be in mode \'full\', swapping upper/lower')
-            imgModes[0], imgModes[1] = 'full', imgModes[0]
+            self.imgModes[0], self.imgModes[1] = 'full', self.imgModes[0]
 
         # If upper is 'none', forcing 'crop'
-        if imgModes[0] in ['', 'none']:
-            self.log.LogText(2, 'CheckSettings: mode[0]=\'%s\', switching to \'crop\' to enable monitoring' % imgModes[0])
-            imgModes[0] = 'crop'
-            imgModes[1] = 'none'
+        if self.imgModes[0] in ['', 'none']:
+            self.log.LogText(2, 'CheckSettings: mode[0]=\'%s\', switching to \'crop\' to enable monitoring' % self.imgModes[0])
+            self.imgModes[0] = 'crop'
+            self.imgModes[1] = 'none'
 
         # If blob detector, thresh or morph depend on blobDetectMode
-        if runDetect.value and not self.simpleDetector and self.blobDetectMode != 'morph':
+        if self.runDetect.value and not self.simpleDetector and self.blobDetectMode != 'morph':
             for mIndex in range(2):
                 if self.blobDetectMode == 'diff':
-                    if imgModes[mIndex] in ['thresh', 'morph']:
-                        self.log.LogText(2, 'CheckSettings: cannot use mode[%d]=\'%s\' with blobDetectMode=\'%s\', switching to \'diff\'' % (mIndex, imgModes[mIndex], self.blobDetectMode))
-                        imgModes[mIndex] = 'diff'
+                    if self.imgModes[mIndex] in ['thresh', 'morph']:
+                        self.log.LogText(2, 'CheckSettings: cannot use mode[%d]=\'%s\' with blobDetectMode=\'%s\', switching to \'diff\'' % (mIndex, self.imgModes[mIndex], self.blobDetectMode))
+                        self.imgModes[mIndex] = 'diff'
                 elif self.blobDetectMode == 'thresh':
-                    if imgModes[mIndex] == 'morph':
-                        self.log.LogText(2, 'CheckSettings: cannot use mode[%d]=\'%s\' with blobDetectMode=\'%s\', switching to \'thresh\'' % (mIndex, imgModes[mIndex], self.blobDetectMode))
-                        imgModes[mIndex] = 'thresh'
+                    if self.imgModes[mIndex] == 'morph':
+                        self.log.LogText(2, 'CheckSettings: cannot use mode[%d]=\'%s\' with blobDetectMode=\'%s\', switching to \'thresh\'' % (mIndex, self.imgModes[mIndex], self.blobDetectMode))
+                        self.imgModes[mIndex] = 'thresh'
 
         # If no detection
-        if not runDetect.value and not runDLC.value:
+        if not self.runDetect.value and not self.runDLC.value:
             self.log.LogText(2, 'CheckSettings: no detection enabled (runDetect and runDLC are set to False)')
-            triangulate.value = False
-            showPos2D.value = False
-            showDLC.value = False
-            sendPos3D.value = False
-            imgModes[0] = 'crop'
-            imgModes[1] = 'none'
+            self.triangulate.value = False
+            self.showPos2D.value = False
+            self.showDLC.value = False
+            self.sendPos3D.value = False
+            self.imgModes[0] = 'crop'
+            self.imgModes[1] = 'none'
 
         # If running DLC but not classic detection
-        if not runDetect.value and runDLC.value:
-            if imgModes[0] in ['diff', 'thresh', 'morph']:
-                self.log.LogText(2, 'CheckSettings: cannot use mode[0]=\'%s\' with tracking set to false, switching to \'crop\'' % imgModes[0])
-                imgModes[0] = 'crop'
-            if imgModes[1] in ['diff', 'thresh', 'morph']:
-                self.log.LogText(2, 'CheckSettings: cannot use mode[1]=\'%s\' with tracking set to false, removing lower mode' % imgModes[1])
-                imgModes[1] = 'none'
+        if not self.runDetect.value and self.runDLC.value:
+            if self.imgModes[0] in ['diff', 'thresh', 'morph']:
+                self.log.LogText(2, 'CheckSettings: cannot use mode[0]=\'%s\' with tracking set to false, switching to \'crop\'' % self.imgModes[0])
+                self.imgModes[0] = 'crop'
+            if self.imgModes[1] in ['diff', 'thresh', 'morph']:
+                self.log.LogText(2, 'CheckSettings: cannot use mode[1]=\'%s\' with tracking set to false, removing lower mode' % self.imgModes[1])
+                self.imgModes[1] = 'none'
 
         # If single camera
         if self.camCount == 1:
-            if triangulate.value:
+            if self.triangulate.value:
                 self.log.LogText(2, 'CheckSettings: triangulation requested but only one camera is active, ignoring')
-                triangulate.value = False
-                sendPos3D.value = False
+                self.triangulate.value = False
+                self.sendPos3D.value = False
 
         # If multiple fish
         if self.nFish > 1:
-            if runDLC.value:
+            if self.runDLC.value:
                 self.log.LogText(2, 'CheckSettings: DLC inferences requested but more than 1 fish being tracked, ignoring')
-                runDLC.value = False
-                showDLC.value = False
+                self.runDLC.value = False
+                self.showDLC.value = False
             # Prevent use of filters over sliding window (needs to solve identification first)
             self.filter2D = 0
             self.filter3D = 0
@@ -375,13 +361,13 @@ class Tracking:
         self.log.LogText(1, 'Start() called')
 
         # Dual mode ?
-        self.dualMode = imgModes[1] not in ['', 'none']
+        self.dualMode = self.imgModes[1] not in ['', 'none']
 
         processList = []
 
         # Start video processing to get full and cropped images (one per camera)
         VideoCaptureProcs = []
-        acquiring[:self.camCount] = [False] * self.camCount
+        self.acquiring[:self.camCount] = [False] * self.camCount
         for camInd in range(self.camCount):
             VideoCaptureProcs.append(mp.Process(target=self.VideoCapture, args=(camInd,)))
         time.sleep(0.1)
@@ -391,44 +377,44 @@ class Tracking:
 
         # Waits that all video processing processes are acquiring from cameras
         t0 = time.perf_counter()
-        while acquiring[:self.camCount] != [True] * self.camCount:
+        while self.acquiring[:self.camCount] != [True] * self.camCount:
             time.sleep(0.1)
-            if (time.perf_counter() - t0 > self.connectTimeout + 1) or stopRequest.value:
+            if (time.perf_counter() - t0 > self.connectTimeout + 1) or self.stopRequest.value:
                 self.log.LogText(2, 'Start: could not start all VideoProcessing processes')
-                stopRequest.value = True
+                self.stopRequest.value = True
                 return -1
-        expStarted.value = True
+        self.expStarted.value = True
 
         # Send sync request to reset image indexes
         self.log.LogText(2, 'Start: sending syncRequest')
-        syncRequest[:self.camCount] = [True] * self.camCount
-        while syncRequest[:self.camCount] != [False] * self.camCount: pass
+        self.syncRequest[:self.camCount] = [True] * self.camCount
+        while self.syncRequest[:self.camCount] != [False] * self.camCount: pass
 
         # Start detection processes (one per camera)
         runDetectProcs = []
-        if runDetect.value:
-            detectRunning[:self.camCount] = [False] * self.camCount
+        if self.runDetect.value:
+            self.detectRunning[:self.camCount] = [False] * self.camCount
             for camInd in range(self.camCount):
                 runDetectProcs.append(mp.Process(target=self.RunDetect, args=(camInd, )))
             time.sleep(0.1)
             for camInd in range(self.camCount):
                 runDetectProcs[camInd].start()
             processList.extend(runDetectProcs)
-            while detectRunning[:self.camCount] != [True] * self.camCount:
+            while self.detectRunning[:self.camCount] != [True] * self.camCount:
                 time.sleep(0.1)
 
         # Start DLC inferences process (which will start 2 threads)
-        if runDLC.value:
-            DLCrunning.value = False
+        if self.runDLC.value:
+            self.DLCrunning.value = False
             runDLCproc = mp.Process(target=self.RunDLC, args=())
             runDLCproc.start()
             processList.append(runDLCproc)
-            while not DLCrunning.value:
+            while not self.DLCrunning.value:
                 time.sleep(0.1)
 
-        if runDetect.value or runDLC.value:
+        if self.runDetect.value or self.runDLC.value:
             # Start triangulation process (only one)
-            if triangulate.value:
+            if self.triangulate.value:
                 self.log.LogText(1, 'Start: start triangulation')
                 triangulationProc = mp.Process(target=self.Triangulation)  # pCutoff not used (image thresholding only)
                 triangulationProc.start()
@@ -463,23 +449,23 @@ class Tracking:
 
         self.log.LogText(1, 'Monitoring() called as main thread')
 
-        windowName = 'Images %s' % ('(with DLC)' if runDLC.value else '')
+        windowName = 'Images %s' % ('(with DLC)' if self.runDLC.value else '')
         cv2.namedWindow(windowName, cv2.WINDOW_GUI_NORMAL | cv2.WINDOW_AUTOSIZE)
 
         imgIndexesPrev = [-1] * self.camCount
 
         # Prepares target panel
-        fullSize = imgModes[0] == 'full'
-        imgMonitDim0 = list(imgMonits[0].shape)
+        fullSize = self.imgModes[0] == 'full'
+        imgMonitDim0 = list(self.imgMonits[0].shape)
         if self.dualMode:
-            imgMonitDim1 = list(imgMonits[2].shape)
+            imgMonitDim1 = list(self.imgMonits[2].shape)
             convertColor1 = len(imgMonitDim0) < len(imgMonitDim1)
             convertColor2 = len(imgMonitDim1) < len(imgMonitDim0)
         if abs(self.rotateCamList[0]) != 0:
             imgMonitDim0[0], imgMonitDim0[1] = imgMonitDim0[1], imgMonitDim0[0]         # Swap dimensions (for rotations)
             if self.dualMode:
                 imgMonitDim1[0], imgMonitDim1[1] = imgMonitDim1[1], imgMonitDim1[0]     # Swap dimensions (for rotations)
-        if imgModes[0] == 'full':
+        if self.imgModes[0] == 'full':
             imgMonitDim0[0] //= 2
             imgMonitDim0[1] //= 2
         panelDim = []
@@ -491,9 +477,9 @@ class Tracking:
         if len(imgMonitDim0) == 3 or len(imgMonitDim1) == 3:
             panelDim.append(3)                            # Color channels if in color mode
         imgPanel = np.zeros(panelDim, 'uint8')
-        textColor = [[255] * 3 if imgModes[0] in ['diff', 'thresh', 'morph'] else 0]
+        textColor = [[255] * 3 if self.imgModes[0] in ['diff', 'thresh', 'morph'] else 0]
         if self.dualMode:
-            textColor.append([255]*3 if imgModes[1] in ['diff', 'thresh', 'morph'] else 0)
+            textColor.append([255]*3 if self.imgModes[1] in ['diff', 'thresh', 'morph'] else 0)
 
         # Initializes performance profiler
         if showPerfs:
@@ -506,7 +492,7 @@ class Tracking:
         while True:
 
             # Quits on stopAcquisition
-            if stopRequest.value:
+            if self.stopRequest.value:
                 cv2.destroyAllWindows()
                 self.log.LogText(1, 'Monitoring: stop request received, quitting')
                 return
@@ -516,54 +502,54 @@ class Tracking:
             for camInd in range(self.camCount):
 
                 # Continues if same image
-                if imgIndexes[camInd] == imgIndexesPrev[camInd]:
+                if self.imgIndexes[camInd] == imgIndexesPrev[camInd]:
                     sameCounter += 1
                     continue
 
                 # Update performance counter
                 if showPerfs:
-                    missed += imgIndexes[camInd] - imgIndexesPrev[camInd] - 1  # Missed frames
+                    missed += self.imgIndexes[camInd] - imgIndexesPrev[camInd] - 1  # Missed frames
                     updatedCamCount += 1
-                imgIndexesPrev[camInd] = imgIndexes[camInd]
+                imgIndexesPrev[camInd] = self.imgIndexes[camInd]
 
                 # Get last image in the desired format
                 camNb = self.camList[camInd]
-                # self.log.LogText(4, 'Monitoring: getting camera %d image %d' % (camNb, imgIndexes[camInd]))
-                img = np.copy(imgMonits[camInd])   # Get monitoring image
+                # self.log.LogText(4, 'Monitoring: getting camera %d image %d' % (camNb, self.imgIndexes[camInd]))
+                img = np.copy(self.imgMonits[camInd])   # Get monitoring image
 
                 # Draws crop rectangle if full image
                 if fullSize:
                     img = cv2.rectangle(img, self.cropULs[camInd], self.cropULs[camInd] + np.array(self.cropSize), textColor, thickness=2)
 
-                if showPos2D.value:
-                    # self.log.LogText(4, 'Monitoring: add %d detected fish position(s)' % nFishDetect2D[0])
+                if self.showPos2D.value:
+                    # self.log.LogText(4, 'Monitoring: add %d detected fish position(s)' % self.nFishDetect2D[0])
 
-                    if runDLC.value and useCyclop.value:
+                    if self.runDLC.value and self.useCyclop.value:
                         # Draws circle on cyclop position
-                        pPos = np.sqrt(pos2D_cyclop[camInd][2])      # Inference probability
+                        pPos = np.sqrt(self.pos2D_cyclop[camInd][2])      # Inference probability
                         if pPos > 0:
                             if fullSize:
-                                xPos, yPos = pos2D_cyclop[camInd][:2].astype(int)
+                                xPos, yPos = self.pos2D_cyclop[camInd][:2].astype(int)
                             else:
-                                xPos, yPos = pos2D_cyclop[camInd][:2].astype(int) - self.cropULs[camInd]
+                                xPos, yPos = self.pos2D_cyclop[camInd][:2].astype(int) - self.cropULs[camInd]
                             img = cv2.circle(img, (xPos, yPos), int(cyclopRadius * pPos), [255-cyclopColor]*3, thickness=cv2.FILLED)
                             img = cv2.circle(img, (xPos, yPos), int(keyRadius * pPos), [cyclopColor]*3, thickness=cv2.FILLED)
 
-                    elif runDetect.value:
+                    elif self.runDetect.value:
                         # Draws circle(s) on detected 2D position(s)
-                        for fishIndex in range(nFishDetect2D[camInd]):
+                        for fishIndex in range(self.nFishDetect2D[camInd]):
                             if fullSize:
-                                xPos, yPos = pos2Ds[camInd][fishIndex].astype(int)
+                                xPos, yPos = self.pos2Ds[camInd][fishIndex].astype(int)
                             else:
-                                xPos, yPos = pos2Ds[camInd][fishIndex].astype(int) - self.cropULs[camInd]
+                                xPos, yPos = self.pos2Ds[camInd][fishIndex].astype(int) - self.cropULs[camInd]
                             img = cv2.circle(img, (xPos, yPos), 5, [255-cyclopColor]*3, thickness=cv2.FILLED)
                             img = cv2.circle(img, (xPos, yPos), 3, [cyclopColor]*3, thickness=cv2.FILLED)
 
-                if showDLC.value:
+                if self.showDLC.value:
                     # Adds keys inferred by DLC (with lag when shown in real-time)
                     # self.log.LogText(4, 'Monitoring: add keys inferred by DLC on cam%d' % camNb)
 
-                    posKey = np.copy(pos2Ds_DLC[camInd])  # Get tensor flow detected pos2D
+                    posKey = np.copy(self.pos2Ds_DLC[camInd])  # Get tensor flow detected pos2D
                     for keyInd, keyName in enumerate(self.keynames):
                         # Draws circle on inferred key (size depends on probability)
                         if fullSize:
@@ -592,19 +578,19 @@ class Tracking:
 
                 # Add mode
                 if camInd == 1:
-                    img = cv2.putText(img, 'Mode=\'%s\'' % imgModes[0], (imgMonitDim0[1] - 120, 20), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
+                    img = cv2.putText(img, 'Mode=\'%s\'' % self.imgModes[0], (imgMonitDim0[1] - 120, 20), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
 
                 # Add camera detection infos
-                if triangulate.value and self.nFish == 1:
+                if self.triangulate.value and self.nFish == 1:
                     xText = 10 if camInd == 0 else imgMonitDim0[1]-200
-                    img = cv2.putText(img, 'Cam%d (%d fish detected)' % (camInd, nFishDetect2D[camInd]), (xText, imgMonitDim0[0]-10), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
+                    img = cv2.putText(img, 'Cam%d (%d fish detected)' % (camInd, self.nFishDetect2D[camInd]), (xText, imgMonitDim0[0]-10), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
 
                 # Places updated image in 2-images upper panel (for monitoring)
                 imgPanel[:imgMonitDim0[0], camInd*imgMonitDim0[1]:(camInd+1)*imgMonitDim0[1]] = img
 
                 # Lower panel if dual monitoring mode
                 if self.dualMode:
-                    imgMonitLow = np.copy(imgMonits[camInd+2])
+                    imgMonitLow = np.copy(self.imgMonits[camInd+2])
 
                     # Rotate image to align monitoring with setup
                     if self.rotateCamList[camInd] == 90:
@@ -619,7 +605,7 @@ class Tracking:
 
                     # Add mode
                     if camInd == 1:
-                        imgMonitLow = cv2.putText(imgMonitLow, 'Mode=\'%s\'' % imgModes[1], (imgMonitDim1[1] - 120, 20), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[1])
+                        imgMonitLow = cv2.putText(imgMonitLow, 'Mode=\'%s\'' % self.imgModes[1], (imgMonitDim1[1] - 120, 20), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[1])
                     startIndW = camInd*imgMonitDim0[1] + (imgMonitDim0[1]-imgMonitDim1[1]) // 2
                     # Places updated image in 2-images lower panel (for monitoring)
                     imgPanel[imgMonitDim0[0]:imgMonitDim0[0] + imgMonitDim1[0], startIndW:startIndW + imgMonitDim1[1]] = imgMonitLow
@@ -644,8 +630,8 @@ class Tracking:
                 imgPanel = cv2.putText(imgPanel, perfStr, (10, 20), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
 
             # Add retained triangulation value
-            if triangulate.value:
-                tpos3D = tuple(pos3D_cyclop[0][:3]) if useCyclop.value else tuple(pos3Ds[0][0, :])
+            if self.triangulate.value:
+                tpos3D = tuple(self.pos3D_cyclop[0][:3]) if self.useCyclop.value else tuple(self.pos3Ds[0][0, :])
                 imgPanel = cv2.putText(imgPanel, 'Triangulation (%.1f, %.1f, %.1f)' % tpos3D, (imgMonitDim0[1]-100, imgMonitDim0[0]-10), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
 
             # Shows image panel
@@ -664,7 +650,7 @@ class Tracking:
         indexStart = -1             # To 'softly' synchronize image indexes
         dataRecordingPrev = False   # Stores previous flag state
         video = None                # Stores video writer
-        acquiring[camInd] = False
+        self.acquiring[camInd] = False
 
         # Initialize Ximea camera and starts data acquisition
         if True:
@@ -679,9 +665,9 @@ class Tracking:
                     break
                 except Exception as errMsg:
                     self.log.LogText(2, 'VideoCapture(%d): could not open camera (%s), trying later' % (camNb, errMsg))
-                if (time.perf_counter() - t0 > self.connectTimeout-1) or stopRequest.value:
+                if (time.perf_counter() - t0 > self.connectTimeout-1) or self.stopRequest.value:
                     self.log.LogText(1, 'VideoCapture(%d): could not open camera, quitting' % camNb)
-                    stopRequest.value = True
+                    self.stopRequest.value = True
                     return -1
 
             # Set camera parameters
@@ -714,14 +700,14 @@ class Tracking:
             missed = 0
             missedCount = 0
 
-        acquiring[camInd] = True
+        self.acquiring[camInd] = True
         while True:
 
             # Quits on stopRequest
-            if stopRequest.value or quit.value:
-                self.log.LogText(1, 'VideoCapture(%d): %s requested' % (camNb, 'stop request' if stopRequest.value else 'quit'))
-                acquiring[camInd] = False
-                dataRecording.value = False     # Sends signal to stop data recording (in case)
+            if self.stopRequest.value or self.quit.value:
+                self.log.LogText(1, 'VideoCapture(%d): %s requested' % (camNb, 'stop request' if self.stopRequest.value else 'quit'))
+                self.acquiring[camInd] = False
+                self.dataRecording.value = False     # Sends signal to stop data recording (in case)
                 if not dataRecordingPrev:
                     # Quits when no longer recording
                     cv2.destroyAllWindows()
@@ -729,19 +715,19 @@ class Tracking:
                         xiCam.stop_acquisition()
                         xiCam.close_device()
                         self.log.LogText(2, 'VideoCapture(%d): camera closed, quitting' % camNb)
-                        acquiring[camInd] = False
+                        self.acquiring[camInd] = False
                     return
 
             # At trial start: create video writers for each camera
-            if dataRecording.value and not dataRecordingPrev:
+            if self.dataRecording.value and not dataRecordingPrev:
                 # Creates paths if not existing
-                path = self.resultsDir + '%s/%s/' % (expID.value, subjectID.value)
-                resultsFile = 'Trial-%s_Cond-%s' % (trialID.value, condID.value)
+                path = self.settings.resultsDir + '%s/%s/' % (self.expID.value, self.subjectID.value)
+                resultsFile = 'Trial-%s_Cond-%s' % (self.trialID.value, self.condID.value)
                 try:
                     os.makedirs(path)
                 except FileExistsError:
                     pass
-                if recVideos.value:
+                if self.recVideos.value:
                     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                     video = cv2.VideoWriter(path + resultsFile + '_cam%d' % camNb + '.mp4', fourcc, self.framerate, (imgWidth, imgHeight), isColor=True)
                     self.log.LogText(2, ' VideoCapture(%d): video writers created' % camNb)
@@ -757,9 +743,9 @@ class Tracking:
                 continue
 
             # Store newly acquired image index
-            if syncRequest[camInd] or indexStart == -1:
+            if self.syncRequest[camInd] or indexStart == -1:
                 indexStart = xiImg.nframe
-                syncRequest[camInd] = False
+                self.syncRequest[camInd] = False
             imgIndex = xiImg.nframe - indexStart
 
             # Show performance (missed frames each second and framerate)
@@ -786,34 +772,34 @@ class Tracking:
             imgCrop = np.copy(imgFull[Ymin:Ymax, Xmin:Xmax, :])
 
             # During trial: update corresponding video
-            if dataRecording.value and dataRecordingPrev:
-                if recVideos.value:
+            if self.dataRecording.value and dataRecordingPrev:
+                if self.recVideos.value:
                     video.write(imgFull)
 
             # At trial end: closes video writers and saves
             elif dataRecordingPrev:
-                if recVideos.value:
+                if self.recVideos.value:
                     video.release()
                     video = None
                     self.log.LogText(2, 'VideoCapture(%d): cam%d video closed and saved' % (camNb, camNb))
                 dataRecordingPrev = False
 
-            if runDLC.value or imgModes[0] == 'crop' or imgModes[1] == 'crop':
+            if self.runDLC.value or self.imgModes[0] == 'crop' or self.imgModes[1] == 'crop':
                 # Prepare cropped image
-                imgCrops[camInd] = imgCrop
+                self.imgCrops[camInd] = imgCrop
                 self.log.LogText(3, 'VideoCapture(%d): image %03d cropped, upper-left corner (%d, %d)' % (camNb, imgIndex, Xmin, Ymin))
 
             # Stores into shared variables
-            imgIndexes[camInd] = imgIndex
+            self.imgIndexes[camInd] = imgIndex
 
             # Stores monitoring images
-            if imgModes[0] == 'full':
-                imgMonits[camInd] = imgFull.copy()
-            elif imgModes[0] == 'crop':
-                imgMonits[camInd] = imgCrop.copy()
+            if self.imgModes[0] == 'full':
+                self.imgMonits[camInd] = imgFull.copy()
+            elif self.imgModes[0] == 'crop':
+                self.imgMonits[camInd] = imgCrop.copy()
             if self.dualMode:
-                if imgModes[1] == 'crop':
-                    imgMonits[camInd+2] = imgCrop.copy()
+                if self.imgModes[1] == 'crop':
+                    self.imgMonits[camInd+2] = imgCrop.copy()
 
     # Run detection 2D on cropped image, simple or blob detector (PROCESS)
     def RunDetect(self, camInd, showPerfs=False):
@@ -822,7 +808,7 @@ class Tracking:
         camNb = self.camList[camInd]
         self.log.LogText(1, 'RunDetect(%d) process running (PID: %d)' % (camNb, mp.current_process().pid))
 
-        detectRunning[camInd] = False
+        self.detectRunning[camInd] = False
         dataRecordingPrev = False           # Stores previous flag state
         imgIndexPrev = -1                 # Stores previous img index per camera
 
@@ -869,7 +855,7 @@ class Tracking:
             # Checks if shape is ok
             if imgRefGray.shape != (self.cropSize[1], self.cropSize[0]):
                 self.log.LogText(2, 'RunDetect(%d): \'%s\' reference image has bad shape, forcing a new one' % (camNb, filename))
-                newRefRequest[camInd] = True
+                self.newRefRequest[camInd] = True
             else:
                 self.log.LogText(2, 'RunDetect(%d): \'%s\' reference image loaded' % (camNb, filename))
 
@@ -917,31 +903,31 @@ class Tracking:
 
         self.log.LogText(2, 'RunDetect: processing started')
 
-        detectRunning[camInd] = True
+        self.detectRunning[camInd] = True
         while True:
 
             # Quits on stopRequest
-            if stopRequest.value or quit.value:
-                self.log.LogText(1, 'RunDetect(%d): %s requested' % (camNb, 'stop request' if stopRequest.value else 'quit'))
-                acquiring[camInd] = False
-                dataRecording.value = False     # Sends signal to stop data recording (in case)
+            if self.stopRequest.value or self.quit.value:
+                self.log.LogText(1, 'RunDetect(%d): %s requested' % (camNb, 'stop request' if self.stopRequest.value else 'quit'))
+                self.acquiring[camInd] = False
+                self.dataRecording.value = False     # Sends signal to stop data recording (in case)
                 if not dataRecordingPrev:
                     # Quits when no longer recording
                     cv2.destroyAllWindows()
-                    detectRunning[camInd] = False
+                    self.detectRunning[camInd] = False
                     return
 
             # Get img index and skips if same
-            imgIndex = imgIndexes[camInd]
+            imgIndex = self.imgIndexes[camInd]
             if imgIndex == imgIndexPrev:
                 continue
 
             # Get current cropped image
-            imgCrop = np.copy(imgCrops[camInd])
+            imgCrop = np.copy(self.imgCrops[camInd])
 
             # Show performance (missed frames each second and framerate)
             if showPerfs:
-                missed += imgIndexes[camInd] - imgIndexPrev - 1     # Missed frames
+                missed += self.imgIndexes[camInd] - imgIndexPrev - 1     # Missed frames
                 t1 = time.perf_counter()
                 missedCount += missed
                 if t1 - tm > 1:   # Every one second, estimates missed frames
@@ -955,7 +941,7 @@ class Tracking:
                 self.log.LogText(3, 'RunDetect: (%d) framerate=%.1f fps' % (imgIndex, fps))
 
             # Process new reference request
-            if newRefRequest[camInd]:
+            if self.newRefRequest[camInd]:
                 if imgRefCount == 0:
                     # Start
                     self.log.LogText(2, 'RunDetect(%d): starting image sampling for new reference image' % camNb)
@@ -977,7 +963,7 @@ class Tracking:
                     # Resets variables
                     imgRefAvg = np.zeros((self.cropSize[1], self.cropSize[0], 3))
                     imgRefCount = 0
-                    newRefRequest[camInd] = False
+                    self.newRefRequest[camInd] = False
 
             # Prepares grayscale image
             imgGray = cv2.cvtColor(imgCrop, cv2.COLOR_BGR2GRAY)
@@ -1094,23 +1080,23 @@ class Tracking:
                 self.log.LogText(3, 'RunDetect(%d): image %03d detected positions (X,Y)=%s' % (camNb, imgIndex, str(pos2D[:nBlobs])))
 
             # Stores into shared variables
-            pos2Ds[camInd] = pos2D.copy()
-            nFishDetect2D[camInd] = nBlobs                        # Pipes nBlobs to other processes
+            self.pos2Ds[camInd] = pos2D.copy()
+            self.nFishDetect2D[camInd] = nBlobs                        # Pipes nBlobs to other processes
 
             # Stores monit images
-            if imgModes[0] == 'diff':
-                imgMonits[camInd] = imgDiff.copy()
-            elif imgModes[0] == 'thresh':
-                imgMonits[camInd] = imgThresh.copy()
-            elif imgModes[0] == 'morph':
-                imgMonits[camInd] = imgMorph.copy()
+            if self.imgModes[0] == 'diff':
+                self.imgMonits[camInd] = imgDiff.copy()
+            elif self.imgModes[0] == 'thresh':
+                self.imgMonits[camInd] = imgThresh.copy()
+            elif self.imgModes[0] == 'morph':
+                self.imgMonits[camInd] = imgMorph.copy()
             if self.dualMode:
-                if imgModes[1] == 'diff':
-                    imgMonits[camInd+2] = imgDiff.copy()
-                elif imgModes[1] == 'thresh':
-                    imgMonits[camInd+2] = imgThresh.copy()
-                elif imgModes[1] == 'morph':
-                    imgMonits[camInd+2] = imgMorph.copy()
+                if self.imgModes[1] == 'diff':
+                    self.imgMonits[camInd+2] = imgDiff.copy()
+                elif self.imgModes[1] == 'thresh':
+                    self.imgMonits[camInd+2] = imgThresh.copy()
+                elif self.imgModes[1] == 'morph':
+                    self.imgMonits[camInd+2] = imgMorph.copy()
 
     # Run DeepLabCut inferences on cropped images (PROCESS)
     def RunDLC(self):
@@ -1118,7 +1104,7 @@ class Tracking:
 
         self.log.LogText(1, 'RunDLC() process running (PID: %d)' % mp.current_process().pid)
 
-        DLCrunning.value = False
+        self.DLCrunning.value = False
 
         # DLC neural network initialization
         if True:
@@ -1162,18 +1148,18 @@ class Tracking:
             while True:
 
                 # Quits on stopRequest
-                if stopRequest.value or quit.value:
+                if self.stopRequest.value or self.quit.value:
                     self.log.LogText(1, 'DLC_Inference(%d): stop request received, thread ending' % camNb)
-                    DLCrunning.value = False
+                    self.DLCrunning.value = False
                     return
 
                 # Get img index and skips if same
-                imgIndex = imgIndexes[camInd]
+                imgIndex = self.imgIndexes[camInd]
                 if imgIndex == imgIndexPrev:
                     continue
 
                 # Gets current img
-                imgDLC = np.copy(imgCrops[camInd])
+                imgDLC = np.copy(self.imgCrops[camInd])
 
                 # Convert to DLC array format
                 imgDLC = np.array(imgDLC, 'float32') / 255    # Values between 0 and 1
@@ -1191,15 +1177,15 @@ class Tracking:
                         inferredPos[keyInd, 0:2] = -np.ones(2)
 
                 # Stores in shared variable for further triangulation and results saving
-                pos2Ds_DLC[camInd] = np.copy(inferredPos)
-                imgIndexes_DLC[camInd] = imgIndex
+                self.pos2Ds_DLC[camInd] = np.copy(inferredPos)
+                self.imgIndexes_DLC[camInd] = imgIndex
 
                 # Computes cyclop
-                keyAvgValidIndexes = [keyInd for keyInd in keyCyclopInds if pos2Ds_DLC[camInd][keyInd, 2] >= self.pThreshCyclop]
+                keyAvgValidIndexes = [keyInd for keyInd in keyCyclopInds if self.pos2Ds_DLC[camInd][keyInd, 2] >= self.pThreshCyclop]
                 if len(keyAvgValidIndexes) >= 1:      # Minimum of 2 keys in the list must be valid
-                    pos2D_cyclop[camInd] = np.average(pos2Ds_DLC[camInd][keyAvgValidIndexes, :], axis=0)
+                    self.pos2D_cyclop[camInd] = np.average(self.pos2Ds_DLC[camInd][keyAvgValidIndexes, :], axis=0)
                 else:
-                    pos2D_cyclop[camInd] = -np.ones(3)
+                    self.pos2D_cyclop[camInd] = -np.ones(3)
                     # self.log.LogText(4, 'DLC_Inference(%d): inference quality on imgIndex=%d is too low to return a valid cyclop (pos2D)' % (camNb, imgIndex))
 
         # Run 2 threads, one for each camera
@@ -1208,7 +1194,7 @@ class Tracking:
             DLC_threads.append(threading.Thread(target=DLC_Inference, args=(self, camInd, dlc_live)))
             DLC_threads[camInd].start()
 
-        DLCrunning.value = True
+        self.DLCrunning.value = True
         self.log.LogText(1, 'RunDLC: all DLC_inference threads have been launched, quitting')
         return
 
@@ -1218,12 +1204,12 @@ class Tracking:
         self.log.LogText(1, 'Triangulation() process running (PID: %d)' % mp.current_process().pid)
 
         # Loads passage matrices virt2real of the 2-camera system
-        pMatrix_VirtToReal = np.load(self.calibDir + 'Pmatrix_virt2real.npy')
+        pMatrix_VirtToReal = np.load(self.settings.calibDir + 'Pmatrix_virt2real.npy')
 
         # Loads camera projection matrices
         pMatrices = [None] * self.camCount
         for camNb in range(self.camCount):     # Loads all of them, regardless of connected cameras
-            pMatrices[camNb] = np.load(self.calibDir + 'Pmatrix_cam%d.npy' % camNb)
+            pMatrices[camNb] = np.load(self.settings.calibDir + 'Pmatrix_cam%d.npy' % camNb)
 
         # Triangulate pos2D pairs
         def Triangulate(pos2D_copy):
@@ -1277,28 +1263,28 @@ class Tracking:
         # Initializes sliding window of filter3D
         if self.filter3D != 0:
             pos3Dslide = np.zeros((3, self.filter3Dsize))
-        imgIndexesPrev = [-1] * camCountMax
-        imgIndexesPrev_DLC = [-1] * camCountMax
+        imgIndexesPrev = [-1] * self.camCount
+        imgIndexesPrev_DLC = [-1] * self.camCount
 
         updatePosUDP = False
         while True:
 
-            if stopRequest.value:
+            if self.stopRequest.value:
                 self.log.LogText(1, 'Triangulation: stop request received, process ending')
                 UDPServerSocket.close()
                 return
 
             # Triangulates detected 2D positions
-            if runDetect.value:
+            if self.runDetect.value:
 
                 # Check if one of the indexes of images has changed and if indexes of images are the same
-                if imgIndexesPrev != imgIndexes[:]:     # and imgIndexes[0] == imgIndexes[1]:
-                    imgIndexesPrev = imgIndexes[:]
+                if imgIndexesPrev != self.imgIndexes[:]:     # and self.imgIndexes[0] == self.imgIndexes[1]:
+                    imgIndexesPrev = self.imgIndexes[:]
 
                     # Gets current 2D position list and image index
                     pos2Ds_copy = list(pos2Ds).copy()
                     nFishDetect2D_copy = list(nFishDetect2D).copy()
-                    imgIndex0 = imgIndexes[0]
+                    imgIndex0 = self.imgIndexes[0]
 
                     # Temporary triangulated var
                     pos3Ds_tmp = -np.ones((10, 3))
@@ -1350,14 +1336,14 @@ class Tracking:
                         nValidPairLists = len(pairListStored)
                         if nValidPairLists == 0:          # Could not find a valid combination list
                             self.log.LogText(3, 'Triangulation (imgIndexes=%s): could not find a pairList with all points remaining in the tank' % str(imgIndexes))
-                            nFishDetect3D.value = 0
+                            self.nFishDetect3D.value = 0
                             # pos3D[0] = np.zeros((self.nBlobsMax, 3))              # Take a list of (0,0,0)
                             # pos3D[0] = np.array([[0, 0, 7.5]]*self.nBlobsMax)     # Take a list of small tank center (0,0,7.5)
                         else:
                             # Keeps only first valid pairlist
-                            nFishDetect3D.value = nFishDetect3Dstored[0]
+                            self.nFishDetect3D.value = nFishDetect3Dstored[0]
                             pos3Ds_tmp[:nFishDetect3Dstored[0]] = pos3DlistStored[0][:nFishDetect3Dstored[0]]
-                            if not useCyclop.value:
+                            if not self.useCyclop.value:
                                 posUDP = pos3Ds_tmp[0]
                                 updatePosUDP = True
                             # if nValidPairLists > 1:
@@ -1366,36 +1352,36 @@ class Tracking:
                     else:
                         # Only one point per camera, triangulate single pair
                         self.log.LogText(3, 'Triangulation (imgIndexes=%s): single pair of detected 2D positions' % str(imgIndexes))
-                        if nFishDetect2D[0] != 0 and nFishDetect2D[1] != 0:
+                        if self.nFishDetect2D[0] != 0 and self.nFishDetect2D[1] != 0:
                             pos2Dpair = np.vstack((pos2Ds_copy[0][0, :], pos2Ds_copy[1][0, :]))       # Get pair
                             pos3Dpair = Triangulate(pos2Dpair)                              # Triangulates
                             if OutOfTank(pos3Dpair):
-                                nFishDetect3D.value = 0
+                                self.nFishDetect3D.value = 0
                             else:
-                                nFishDetect3D.value = 1
+                                self.nFishDetect3D.value = 1
                                 pos3Ds_tmp[0] = pos3Dpair                                   # Valid key triangulation, stores in variable
-                                if not useCyclop.value:
+                                if not self.useCyclop.value:
                                     posUDP = pos3Ds_tmp[0]
                                     updatePosUDP = True
                         else:                                                               # One point is missing for triangulation
-                            nFishDetect3D.value = 0
+                            self.nFishDetect3D.value = 0
 
                     # self.log.LogText(1, 'Triangulation pos3Ds_tmp=%s' % str(pos3Ds_tmp))
-                    pos3Ds[0] = pos3Ds_tmp
-                    imgIndexPos3D.value = imgIndex0            # Takes the index of first camera
+                    self.pos3Ds[0] = pos3Ds_tmp
+                    self.imgIndexPos3D.value = imgIndex0            # Takes the index of first camera
 
             # Triangulates DLC inferred keys
-            if runDLC.value:
+            if self.runDLC.value:
 
                 # Check if one of the indexes of images has changed and if indexes of images are the same
-                if imgIndexesPrev_DLC != imgIndexes_DLC[:]:     # and imgIndexes_DLC[0] == imgIndexes_DLC[1]:
-                    imgIndexesPrev_DLC = imgIndexes_DLC[:]
+                if imgIndexesPrev_DLC != self.imgIndexes_DLC[:]:     # and self.imgIndexes_DLC[0] == self.imgIndexes_DLC[1]:
+                    imgIndexesPrev_DLC = self.imgIndexes_DLC[:]
 
                     self.log.LogText(3, 'Triangulation (imgIndexes=%s): processing DLC keys' % str(imgIndexes))
 
                     # Gets current 2D DLC position list and image index
                     pos2Ds_DLC_copy = np.copy(pos2Ds_DLC)                   # Get copy of inferred positions of all cameras
-                    imgIndex0_DLC = imgIndexes_DLC[0]
+                    imgIndex0_DLC = self.imgIndexes_DLC[0]
 
                     # Temporary keys triangulated var
                     pos3Ds_DLC_tmp = np.zeros((self.nKeys, 4))
@@ -1407,8 +1393,8 @@ class Tracking:
                             pos3Ds_DLC_tmp[keyInd] = -np.ones(4)         # Invalid, sets to -1
                         else:
                             pos3Ds_DLC_tmp[keyInd, 3] = np.mean(pos2Ds_DLC_copy[:2, keyInd, 2])   # Mean inference probability
-                    pos3Ds_DLC[0] = pos3Ds_DLC_tmp                      # Stores output in manager
-                    imgIndexPos3D_DLC.value = imgIndex0_DLC             # Takes first camera index
+                    self.pos3Ds_DLC[0] = pos3Ds_DLC_tmp                      # Stores output in manager
+                    self.imgIndexPos3D_DLC.value = imgIndex0_DLC             # Takes first camera index
 
                     self.log.LogText(3, 'Triangulation (imgIndexes=%s): processing cyclop' % str(imgIndexes))
 
@@ -1425,15 +1411,15 @@ class Tracking:
                             pos3D_cyclop_tmp = -np.ones(4)              # Invalid, sets to -1
                         else:
                             pos3D_cyclop_tmp[3] = np.mean(pos2D_cyclop_copy[:2, 2])     # Mean inference probability
-                            if useCyclop.value:
+                            if self.useCyclop.value:
                                 posUDP = pos3D_cyclop_tmp[:3]
                                 updatePosUDP = True
                     else:
                         pos3D_cyclop_tmp = -np.ones(4)                  # One point is missing for triangulation
-                    pos3D_cyclop[0] = pos3D_cyclop_tmp
+                    self.pos3D_cyclop[0] = pos3D_cyclop_tmp
 
             # Send 3D position to rendering via UDP (only valid when updatePosUDP is True)
-            if sendPos3D.value and updatePosUDP:
+            if self.sendPos3D.value and updatePosUDP:
 
                 # Filter on pos 3D to be sent : mean or median over sliding window
                 if self.filter3D == 1:      # Mean over sliding window
@@ -1461,11 +1447,11 @@ class Tracking:
         dt2D = [('time', 'f8')]
         for camInd in range(self.camCount):
             dt2D.extend([('imgIndex_cam%d' % camInd, 'u4'), ('pos(UL)_cam%d' % camInd, 'u2', 2)])
-            if runDetect.value:
+            if self.runDetect.value:
                 dt2D.append(('nFishDetected_cam%d' % camInd, 'u1'))
                 for fishInd in range(self.nBlobsMax):
                     dt2D.extend([('pos(%d)_cam%d' % (fishInd, camInd), 'f8', 2)])
-            if runDLC.value:
+            if self.runDLC.value:
                 dt2D.extend([('pos(Cyclop)_cam%d' % camInd, 'f8', 2), ('proba(Cyclop)_cam%d' % camInd, 'f8')])
                 for keyName in self.keynames:
                     dt2D.extend([('pos(%s)_cam%d' % (keyName, camInd), 'f8', 2), ('proba(%s)_cam%d' % (keyName, camInd), 'f8')])
@@ -1473,13 +1459,13 @@ class Tracking:
 
         # Prepare new results3D array dt
         dt3D = [('time', 'f8'), ('imgIndex', 'u4')]  # for new res3D array
-        if runDetect.value:
+        if self.runDetect.value:
             dt3D.append(('nFishDetected', 'u1'))
             for fishInd in range(self.nBlobsMax):
                 dt3D.extend([('pos(%d)' % fishInd, 'f8', 3)])
-            if not runDLC.value and self.getVelocity:
+            if not self.runDLC.value and self.getVelocity:
                 dt3D.extend([('vel(Cyclop)', 'f8', 3), ('velNorm(Cyclop)', 'f8')])
-        if runDLC.value:
+        if self.runDLC.value:
             dt3D.extend([('pos(Cyclop)', 'f8', 3), ('proba(Cyclop)', 'f8')])
             if self.getVelocity:
                 dt3D.extend([('vel(Cyclop)', 'f8', 3), ('velNorm(Cyclop)', 'f8')])
@@ -1502,21 +1488,21 @@ class Tracking:
         while True:
 
             # Quits on stopRequest
-            if stopRequest.value:
-                dataRecording.value = False     # Sends signal to stop data recording (in case)
+            if self.stopRequest.value:
+                self.dataRecording.value = False     # Sends signal to stop data recording (in case)
                 if not dataRecordingPrev:       # Quits when no longer recording
                     self.log.LogText(1, 'SaveResults: stop request received, process ending')
                     return
 
-            if dataRecording.value:
+            if self.dataRecording.value:
 
                 if not dataRecordingPrev:
                     # At trial start: initializes arrays
                     self.log.LogText(2, 'SaveResults: preparing arrays (flag dataRecording=True)')
 
                     # Creates paths if not existing
-                    path = self.resultsDir + '%s/%s/' % (expID.value, subjectID.value)
-                    resultsFile = 'Trial-%s_Cond-%s' % (trialID.value, condID.value)
+                    path = self.settings.resultsDir + '%s/%s/' % (self.expID.value, self.subjectID.value)
+                    resultsFile = 'Trial-%s_Cond-%s' % (self.trialID.value, self.condID.value)
                     try:
                         os.makedirs(path)
                     except FileExistsError:
@@ -1529,7 +1515,7 @@ class Tracking:
                     res3D['time'] = -1.0
 
                     # Store initial index of cam0 for time column and rowIndex computations
-                    indexStart = 0      # was imgIndexes[0] or pos2DimgIndexes[0]
+                    indexStart = 0      # was self.imgIndexes[0] or pos2DimgIndexes[0]
                     imgIndexesPrev = [-1] * self.camCount
                     imgIndexesPrev_DLC = [-1] * self.camCount
                     imgIndexPos3DPrev = -1
@@ -1541,42 +1527,42 @@ class Tracking:
 
                 # 2D data
                 for camInd in range(self.camCount):
-                    if runDetect.value:
-                        if imgIndexes[camInd] != imgIndexesPrev[camInd]:
-                            imgIndexesPrev[camInd] = imgIndexes[camInd]
-                            fInd = int(imgIndexes[camInd] - indexStart)
+                    if self.runDetect.value:
+                        if self.imgIndexes[camInd] != imgIndexesPrev[camInd]:
+                            imgIndexesPrev[camInd] = self.imgIndexes[camInd]
+                            fInd = int(self.imgIndexes[camInd] - indexStart)
                             res2D['time'][fInd] = fInd / self.framerate
                             res2D['imgIndex_cam%d' % camInd][fInd] = fInd
                             res2D['pos(UL)_cam%d' % camInd][fInd] = self.cropULs[camInd]
-                            res2D['nFishDetected_cam%d' % camInd][fInd] = nFishDetect2D[camInd]
-                            for fishInd in range(nFishDetect2D[camInd]):                                # Undetected remain at 0
-                                res2D['pos(%d)_cam%d' % (fishInd, camInd)][fInd] = pos2Ds[camInd][fishInd]               # X, Y (pos2D)
+                            res2D['nFishDetected_cam%d' % camInd][fInd] = self.nFishDetect2D[camInd]
+                            for fishInd in range(self.nFishDetect2D[camInd]):                                # Undetected remain at 0
+                                res2D['pos(%d)_cam%d' % (fishInd, camInd)][fInd] = self.pos2Ds[camInd][fishInd]               # X, Y (pos2D)
                             self.log.LogText(3, 'SaveResults: new data available, updating results arrays ')
-                    if runDLC.value:
-                        if imgIndexes_DLC[camInd] != imgIndexesPrev_DLC[camInd]:
-                            imgIndexesPrev_DLC[camInd] = imgIndexes_DLC[camInd]
-                            fInd = int(imgIndexes_DLC[camInd] - indexStart)
+                    if self.runDLC.value:
+                        if self.imgIndexes_DLC[camInd] != imgIndexesPrev_DLC[camInd]:
+                            imgIndexesPrev_DLC[camInd] = self.imgIndexes_DLC[camInd]
+                            fInd = int(self.imgIndexes_DLC[camInd] - indexStart)
                             res2D['time'][fInd] = fInd / self.framerate
                             res2D['imgIndex_cam%d' % camInd][fInd] = fInd
                             res2D['pos(UL)_cam%d' % camInd][fInd] = self.cropULs[camInd]
-                            res2D['pos(Cyclop)_cam%d' % camInd][fInd] = pos2D_cyclop[camInd][:2]  # X, Y (pos2D) of cyclop
-                            res2D['proba(Cyclop)_cam%d' % camInd][fInd] = pos2D_cyclop[camInd][2]  # pMean of cyclop
+                            res2D['pos(Cyclop)_cam%d' % camInd][fInd] = self.pos2D_cyclop[camInd][:2]  # X, Y (pos2D) of cyclop
+                            res2D['proba(Cyclop)_cam%d' % camInd][fInd] = self.pos2D_cyclop[camInd][2]  # pMean of cyclop
                             for keyInd, keyName in enumerate(self.keynames):
-                                res2D['pos(%s)_cam%d' % (keyName, camInd)][fInd] = pos2Ds_DLC[camInd][keyInd, :2]      # X, Y (pos2D) of key keyInd
-                                res2D['proba(%s)_cam%d' % (keyName, camInd)][fInd] = pos2Ds_DLC[camInd][keyInd, 2]     # pMean of key keyInd
+                                res2D['pos(%s)_cam%d' % (keyName, camInd)][fInd] = self.pos2Ds_DLC[camInd][keyInd, :2]      # X, Y (pos2D) of key keyInd
+                                res2D['proba(%s)_cam%d' % (keyName, camInd)][fInd] = self.pos2Ds_DLC[camInd][keyInd, 2]     # pMean of key keyInd
 
                 # 3D data
-                if triangulate.value:
-                    if runDetect.value:
-                        if imgIndexPos3D.value != imgIndexPos3DPrev:
-                            imgIndexPos3DPrev = imgIndexPos3D.value
-                            fInd = int(imgIndexPos3D.value - indexStart)
+                if self.triangulate.value:
+                    if self.runDetect.value:
+                        if self.imgIndexPos3D.value != imgIndexPos3DPrev:
+                            imgIndexPos3DPrev = self.imgIndexPos3D.value
+                            fInd = int(self.imgIndexPos3D.value - indexStart)
                             res3D['time'][fInd] = fInd / self.framerate
                             res3D['imgIndex'][fInd] = fInd
-                            res3D['nFishDetected'][fInd] = nFishDetect3D.value
-                            for fishInd in range(nFishDetect3D.value):          # Undetected remain at 0
-                                res3D['pos(%d)' % fishInd][fInd] = pos3Ds[0][fishInd]       # Stores in results array X, Y, Z (pos3D)
-                            if not runDLC.value and self.getVelocity and fInd > 0:
+                            res3D['nFishDetected'][fInd] = self.nFishDetect3D.value
+                            for fishInd in range(self.nFishDetect3D.value):          # Undetected remain at 0
+                                res3D['pos(%d)' % fishInd][fInd] = self.pos3Ds[0][fishInd]       # Stores in results array X, Y, Z (pos3D)
+                            if not self.runDLC.value and self.getVelocity and fInd > 0:
                                 # Instant velocity vector and norm
                                 if np.all(res3D['pos(0)'][fInd] != -1) and np.all(res3D['pos(0)'][fInd-1]) != -1 and np.all(res3D['pos(0)'][fInd-1] != 0):
                                     res3D['vel(0)'][fInd] = (res3D['pos(0)'][fInd] - res3D['pos(0)'][fInd-1]) / (res3D['time'][fInd] - res3D['time'][fInd-1])
@@ -1584,17 +1570,17 @@ class Tracking:
                                 else:
                                     res3D['vel(0)'][fInd] = -1
                                     res3D['velNorm(0)'][fInd] = -1
-                    if runDLC.value:
-                        if imgIndexPos3D_DLC.value != imgIndexPos3DPrev_DLC:
-                            imgIndexPos3DPrev_DLC = imgIndexPos3D_DLC.value
-                            fInd = int(imgIndexPos3D_DLC.value - indexStart)
+                    if self.runDLC.value:
+                        if self.imgIndexPos3D_DLC.value != imgIndexPos3DPrev_DLC:
+                            imgIndexPos3DPrev_DLC = self.imgIndexPos3D_DLC.value
+                            fInd = int(self.imgIndexPos3D_DLC.value - indexStart)
                             res3D['time'][fInd] = fInd / self.framerate
                             res3D['imgIndex'][fInd] = fInd
-                            res3D['pos(Cyclop)'][fInd] = pos3D_cyclop[0][:3]  # X, Y, Z (pos3D) of cyclop
-                            res3D['proba(Cyclop)'][fInd] = pos3D_cyclop[0][3]  # pMean of cyclop
+                            res3D['pos(Cyclop)'][fInd] = self.pos3D_cyclop[0][:3]  # X, Y, Z (pos3D) of cyclop
+                            res3D['proba(Cyclop)'][fInd] = self.pos3D_cyclop[0][3]  # pMean of cyclop
                             for keyInd, keyName in enumerate(self.keynames):
-                                res3D['pos(%s)' % keyName][fInd] = pos3Ds_DLC[0][keyInd, :3]      # X, Y, Z (pos3D) of key keyInd
-                                res3D['proba(%s)' % keyName][fInd] = pos3Ds_DLC[0][keyInd, 3]     # pMean of key keyInd
+                                res3D['pos(%s)' % keyName][fInd] = self.pos3Ds_DLC[0][keyInd, :3]      # X, Y, Z (pos3D) of key keyInd
+                                res3D['proba(%s)' % keyName][fInd] = self.pos3Ds_DLC[0][keyInd, 3]     # pMean of key keyInd
                             if self.getVelocity and fInd > 0:
                                 # Instant velocity vector and norm
                                 if np.all(res3D['pos(Cyclop)'][fInd] != -1) and np.all(res3D['pos(Cyclop)'][fInd-1]) != -1 and np.all(res3D['pos(Cyclop)'][fInd-1] != 0):
@@ -1605,7 +1591,7 @@ class Tracking:
                                     res3D['velNorm(Cyclop)'][fInd] = -1
                             if self.getGazeDir:
                                 # Instant gaze direction (normalized vector)
-                                vStart, vEnd = pos3Ds_DLC[0][keyGazeDirInds, :3]
+                                vStart, vEnd = self.pos3Ds_DLC[0][keyGazeDirInds, :3]
                                 if np.all(vStart != -1) and np.all(vEnd != -1):
                                     v = vEnd - vStart
                                     res3D['gazeDir'][fInd] = v / np.linalg.norm(v)
@@ -1621,7 +1607,7 @@ class Tracking:
                                 else:
                                     res3D['motionDir'][fInd] = 0
                             if self.getCurvature:
-                                vTailStart, vTailEnd, vHeadStart, vHeadEnd = pos3Ds_DLC[0][keyCurvatureInds, :3]
+                                vTailStart, vTailEnd, vHeadStart, vHeadEnd = self.pos3Ds_DLC[0][keyCurvatureInds, :3]
                                 if np.all(vTailStart != -1) and np.all(vTailEnd != -1) and np.all(vHeadStart != -1) and np.all(vHeadEnd != -1):
                                     vTail = vTailEnd - vTailStart
                                     vHead = vHeadEnd - vHeadStart
@@ -1637,17 +1623,17 @@ class Tracking:
 
                 # General results log file
                 header = ['expID', 'subjectID', 'trialID', 'condID', 'filename']
-                fileName = self.resultsDir + '%s/' % expID.value + '%s_files.tsv' % expID.value
+                fileName = self.settings.resultsDir + '%s/' % self.expID.value + '%s_files.tsv' % self.expID.value
                 writeHeader = not os.path.isfile(fileName)
                 with open(fileName, 'a') as csvfile:
                     filewriter = csv.writer(csvfile, delimiter='\t')
                     if writeHeader:
                         filewriter.writerow(header)
-                    filewriter.writerow([expID.value, subjectID.value, trialID.value, condID.value, resultsFile])
+                    filewriter.writerow([self.expID.value, self.subjectID.value, self.trialID.value, self.condID.value, resultsFile])
 
                 # 2D data
-                if runDetect.value:
-                    if runDLC.value:
+                if self.runDetect.value:
+                    if self.runDLC.value:
                         filename = path + resultsFile + '_pos2D+DLC2D'
                     else:
                         filename = path + resultsFile + '_pos2D'
@@ -1655,15 +1641,15 @@ class Tracking:
                     filename = path + resultsFile + '_DLC2D'
                 res2D = res2D[res2D['time'] != -1.0]
                 np.save(filename, res2D)
-                if self.saveTextCopy:
+                if self.settings.saveTextCopy:
                     header2D = ('%s\t' * len(dt2D.names)) % dt2D.names
                     np.savetxt(filename + '.tsv', res2D, fmt='%s', delimiter='\t', header=header2D, comments='')
                     # res2D.tofile(filename + '.txt', sep='\n')
 
                 # 3D data
-                if triangulate.value:
-                    if runDetect.value:
-                        if runDLC.value:
+                if self.triangulate.value:
+                    if self.runDetect.value:
+                        if self.runDLC.value:
                             filename = path + resultsFile + '_pos3D+DLC3D'
                         else:
                             filename = path + resultsFile + '_pos3D'
@@ -1671,13 +1657,13 @@ class Tracking:
                         filename = path + resultsFile + '_DLC3D'
                     res3D = res3D[res3D['time'] != -1.0]
                     np.save(filename, res3D)
-                    if self.saveTextCopy:
+                    if self.settings.saveTextCopy:
                         header3D = ('%s\t' * len(dt3D.names)) % dt3D.names
                         np.savetxt(filename + '.tsv', res3D, fmt='%s', delimiter='\t', header=header3D, comments='')
                         # res3D.tofile(filename + '.txt', sep='\n')
 
                 dataRecordingPrev = False
-                dataRecording.value = False
+                self.dataRecording.value = False
 
     # TCP server receiving commands from Rendering PC (THREAD)
     def TCPserver(self, cmdSeparator='\t'):
@@ -1698,7 +1684,7 @@ class Tracking:
                 break
 
             self.log.LogText(2, 'TCPserver: up and running waiting for connections')
-            serverRunning.value = True         # Creates GUI once TCP server is running
+            self.serverRunning.value = True         # Creates GUI once TCP server is running
 
             while True:
 
@@ -1710,7 +1696,7 @@ class Tracking:
                 except socket.error as errorMsg:
                     self.log.LogText(2, 'TCPserver: connection error: %s' % errorMsg)
                     serverSocket.close()
-                    quit.value = True
+                    self.quit.value = True
                     return 0
                 self.log.LogText(2, 'TCPserver: connected to client %s' % str(clientAddress))
 
@@ -1739,80 +1725,80 @@ class Tracking:
                         # Process start, stop and quit commands (dispatched to other threads)
                         if cmd == 'startExperiment':
                             self.log.LogText(2, 'TCPserver: \'startExperiment\' received from rendering')
-
                             self.CheckSettings(atLoad=False)        # Check if current settings are ok
-                            dataRecording.value = False
-                            startRequest.value = True
+                            self.dataRecording.value = False
+                            self.startRequest.value = True
                         elif cmd == 'endExperiment':
                             self.log.LogText(2, 'TCPserver: \'endExperiment\' received from rendering')
-                            dataRecording.value = False
-                            stopRequest.value = True
+                            self.dataRecording.value = False
+                            self.stopRequest.value = True
                         elif cmd == 'startTrial':
-                            if len(expID.value) > 0 and len(subjectID.value) > 0 and len(trialID.value) > 0 and len(condID.value) > 0:
+                            if len(self.expID.value) > 0 and len(self.subjectID.value) > 0 and len(self.trialID.value) > 0 and len(self.condID.value) > 0:
                                 self.log.LogText(2, 'TCPserver: \'startTrial\' received from rendering')
-                                self.log.LogText(2, '  with expID=%s, subjectID=%s, trialID=%s, condID=%s (saveResults=%s, recVideos=%s)' % (expID.value, subjectID.value, trialID.value, condID.value, saveResults.value, recVideos.value))
+                                self.log.LogText(2, '  with expID=%s, subjectID=%s, trialID=%s, condID=%s (saveResults=%s, recVideos=%s)' % (self.expID.value, self.subjectID.value, self.trialID.value, self.condID.value, self.saveResults.value, self.recVideos.value))
                                 # Sync image indexes between cameras
-                                syncRequest[:self.camCount] = [True] * self.camCount
-                                while syncRequest[:self.camCount] != [False] * self.camCount: pass
+                                self.syncRequest[:self.camCount] = [True] * self.camCount
+                                while self.syncRequest[:self.camCount] != [False] * self.camCount: pass
                                 time.sleep(0.05)
                                 # Start recording data
-                                if saveResults.value:
-                                    dataRecording.value = True
-                                trialStarted.value = True
+                                if self.saveResults.value:
+                                    self.dataRecording.value = True
+                                self.trialStarted.value = True
                                 # eventString[0] = 'startTrial'
                             else:
                                 self.log.LogText(2, 'TCPserver: \'startTrial\' received but ignored, send expID, subjectID, trialID, condID first')
                         elif cmd == 'endTrial':
                             self.log.LogText(2, 'TCPserver: \'endTrial\' received from rendering')
                             # eventString[0] = 'endTrial'
-                            dataRecording.value = False
-                            trialStarted.value = False
+                            self.dataRecording.value = False
+                            self.trialStarted.value = False
                         elif cmd == 'quit':
                             self.log.LogText(2, 'TCPserver: \'quit\' received')
-                            quit.value = True
-                            stopRequest.value = True
+                            self.quit.value = True
+                            self.stopRequest.value = True
                             clientSocket.close()
                             serverSocket.close()
                             return 0
 
                         # From here on parameters cannot be set if trial started ongoing
-                        elif trialStarted.value:
+                        elif self.trialStarted.value:
                             self.log.LogText(3, 'TCPserver: trial started, command \'%s\' will be ignored' % cmd)
 
                         # Ask for new reference images
                         elif cmd == 'newRef':
                             self.log.LogText(2, 'TCPserver: \'newRef\' received from rendering')
-                            newRefRequest[:self.camCount] = [True] * self.camCount
+                            self.newRefRequest[:self.camCount] = [True] * self.camCount
 
                         # Reload settings
                         elif cmd == 'loadSettings':
                             self.log.LogText(2, 'TCPserver: \'loadSettings\' received from rendering')
                             self.LoadSettings()
+                            self.CheckSettings(atLoad=True)   # Run sanity check for newly loaded settings
 
                         # Loads experiment parameters
                         elif 'expID' in cmd:
                             val = cmd.split(sep='=')[1]
                             self.log.LogText(2, 'TCPserver: self.expID=\'%s\'' % val)
-                            exec('expID.value=\'%s\'' % val)
+                            exec('self.expID.value=\'%s\'' % val)
                         elif 'subjectID' in cmd:
                             val = cmd.split(sep='=')[1]
                             self.log.LogText(2, 'TCPserver: self.subjectID=\'%s\'' % val)
-                            exec('subjectID.value=\'%s\'' % val)
+                            exec('self.subjectID.value=\'%s\'' % val)
                         elif 'trialID' in cmd:
                             val = cmd.split(sep='=')[1]
                             self.log.LogText(2, 'TCPserver: self.trialID=\'%s\'' % val)
-                            exec('trialID.value=\'%s\'' % val)
+                            exec('self.trialID.value=\'%s\'' % val)
                         elif 'condID' in cmd:
                             val = cmd.split(sep='=')[1]
                             self.log.LogText(2, 'TCPserver: self.condID=\'%s\'' % val)
-                            exec('condID.value=\'%s\'' % val)
+                            exec('self.condID.value=\'%s\'' % val)
                         elif 'recVideos' in cmd:
                             val = cmd.split(sep='=')[1]
                             self.log.LogText(2, 'TCPserver: self.recVideos=\'%s\'' % val)
-                            exec('recVideos.value=%s' % val)
-                            # exec('recVideos.value=%d' % 1 if (val == 'true') else 0)      # True in UE is true:::
-                            # exec('recVideos.value=%s' % (val == 'true'))      # True in UE is true:::
-                            self.log.LogText(2, 'TCPserver: self.recVideos=%s' % recVideos.value)
+                            exec('self.recVideos.value=%s' % val)
+                            # exec('self.recVideos.value=%d' % 1 if (val == 'true') else 0)      # True in UE is true:::
+                            # exec('self.recVideos.value=%s' % (val == 'true'))      # True in UE is true:::
+                            self.log.LogText(2, 'TCPserver: self.recVideos=%s' % self.recVideos.value)
 
                         # Unknown command
                         else:
@@ -1836,7 +1822,7 @@ class UIController(QWidget):
         super().__init__()
         self.log = trackInst.log
         self.log.LogText(1, 'UIController() called')
-        UImode = trackInst.controller == 'UI'
+        UImode = trackInst.settings.controller == 'UI'
         self.trackInst = trackInst
 
         # Load section UIs
@@ -1864,44 +1850,44 @@ class UIController(QWidget):
         self.speciesNameTxt = QLabel('Species', self)
         self.speciesNameTxt.setGeometry(posX+20, posY, 120, 30)
         self.speciesNameCombo = QComboBox(self)
-        self.speciesNameCombo.addItems(self.trackInst.speciesNameList)
+        self.speciesNameCombo.addItems(self.trackInst.settings.speciesNameList)
         self.speciesNameCombo.setGeometry(posX + 150, posY, 90, 30)
-        self.speciesNameCombo.setCurrentIndex(self.trackInst.speciesNameList.index(speciesName.value))
+        self.speciesNameCombo.setCurrentIndex(self.trackInst.settings.speciesNameList.index(self.speciesName.value))
         self.speciesNameCombo.currentIndexChanged.connect(self.SpeciesNames)
         posY += 35
         # Run detection
         self.runDetectBtn = QPushButton('Simple detect', self)
         self.runDetectBtn.setGeometry(posX, posY, 120, 30)
         self.runDetectBtn.setCheckable(True)
-        self.runDetectBtn.setChecked(runDetect.value)
+        self.runDetectBtn.setChecked(self.runDetect.value)
         self.runDetectBtn.clicked.connect(self.RunDetect)
         # Show detected position
         self.showPos2DBtn = QPushButton('Show 2D pos', self)
         self.showPos2DBtn.setGeometry(posX + 120, posY, 120, 30)
         self.showPos2DBtn.setCheckable(True)
-        self.showPos2DBtn.setChecked(showPos2D.value)
-        self.showPos2DBtn.setEnabled(runDetect.value or runDLC.value)
+        self.showPos2DBtn.setChecked(self.showPos2D.value)
+        self.showPos2DBtn.setEnabled(self.runDetect.value or self.runDLC.value)
         self.showPos2DBtn.clicked.connect(self.ShowPos2D)
         posY += 35
         # Run DeepLabCut
         self.runDLCBtn = QPushButton('DeepLabCut', self)
         self.runDLCBtn.setGeometry(posX, posY, 120, 30)
         self.runDLCBtn.setCheckable(True)
-        self.runDLCBtn.setChecked(runDLC.value)
+        self.runDLCBtn.setChecked(self.runDLC.value)
         self.runDLCBtn.clicked.connect(self.RunDLC)
         # Show DeepLabCut
         self.showDLCBtn = QPushButton('Show keys', self)
         self.showDLCBtn.setGeometry(posX + 120, posY, 120, 30)
         self.showDLCBtn.setCheckable(True)
-        self.showDLCBtn.setEnabled(runDLC.value)
-        self.showDLCBtn.setChecked(showDLC.value)
+        self.showDLCBtn.setEnabled(self.runDLC.value)
+        self.showDLCBtn.setChecked(self.showDLC.value)
         self.showDLCBtn.clicked.connect(self.ShowDLC)
         posY += 35
         # Use cyclop checker
         self.useCyclopChk = QCheckBox('Use cyclop', self)
         self.useCyclopChk.setCheckable(True)
-        self.useCyclopChk.setChecked(useCyclop.value)
-        self.useCyclopChk.setEnabled(runDLC.value)
+        self.useCyclopChk.setChecked(self.useCyclop.value)
+        self.useCyclopChk.setEnabled(self.runDLC.value)
         self.useCyclopChk.setGeometry(posX + 100, posY, 180, 30)
         self.useCyclopChk.clicked.connect(self.UseCyclop)
         posY += 45
@@ -1909,15 +1895,15 @@ class UIController(QWidget):
         self.triangulateBtn = QPushButton('Triangulate', self)
         self.triangulateBtn.setGeometry(posX, posY, 120, 30)
         self.triangulateBtn.setCheckable(True)
-        self.triangulateBtn.setChecked(triangulate.value)
-        self.triangulateBtn.setEnabled(runDetect.value or runDLC.value)
+        self.triangulateBtn.setChecked(self.triangulate.value)
+        self.triangulateBtn.setEnabled(self.runDetect.value or self.runDLC.value)
         self.triangulateBtn.clicked.connect(self.Triangulate)
         # Send 3D position to Unreal
         self.sendPos3DBtn = QPushButton('Send 3D pos', self)
         self.sendPos3DBtn.setGeometry(posX + 120, posY, 120, 30)
         self.sendPos3DBtn.setCheckable(True)
-        self.sendPos3DBtn.setEnabled(triangulate.value)
-        self.sendPos3DBtn.setChecked(sendPos3D.value)
+        self.sendPos3DBtn.setEnabled(self.triangulate.value)
+        self.sendPos3DBtn.setChecked(self.sendPos3D.value)
         self.sendPos3DBtn.clicked.connect(self.SendPos3D)
         posY += 40
         # Image Mode selection
@@ -1928,7 +1914,7 @@ class UIController(QWidget):
         # self.imgType0 = ['full', 'crop', 'diff', 'thresh', 'morph']
         self.imgModeCombo0.addItems(self.imgType0)
         self.imgModeCombo0.setGeometry(posX + 150, posY, 90, 30)
-        self.imgModeCombo0.setCurrentIndex(self.imgType0.index(imgModes[0]))
+        self.imgModeCombo0.setCurrentIndex(self.imgType0.index(self.imgModes[0]))
         self.imgModeCombo0.currentIndexChanged.connect(self.ImgModes)
         posY += 35
         # Image Mode selection
@@ -1938,11 +1924,11 @@ class UIController(QWidget):
         self.imgType1 = ['none', 'crop', 'diff', 'thresh', 'morph']
         self.imgModeCombo1.addItems(self.imgType1)
         self.imgModeCombo1.setGeometry(posX + 150, posY, 90, 30)
-        if not runDetect.value:
+        if not self.runDetect.value:
             self.imgModeTxt1.setEnabled(False)
             self.imgModeCombo1.setEnabled(False)
-            imgModes[1] = 'none'
-        self.imgModeCombo1.setCurrentIndex(self.imgType1.index(imgModes[1]))
+            self.imgModes[1] = 'none'
+        self.imgModeCombo1.setCurrentIndex(self.imgType1.index(self.imgModes[1]))
         self.imgModeCombo1.currentIndexChanged.connect(self.ImgModes)
         posY += 45
         # Load settings
@@ -1965,7 +1951,7 @@ class UIController(QWidget):
             # Save results checker
             self.saveResultsChk = QCheckBox('Save results', self)
             self.saveResultsChk.setCheckable(True)
-            self.saveResultsChk.setChecked(saveResults.value)
+            self.saveResultsChk.setChecked(self.saveResults.value)
             self.saveResultsChk.setEnabled(True)
             self.saveResultsChk.setGeometry(posX + 100, posY, 180, 30)
             self.saveResultsChk.clicked.connect(self.SaveResults)
@@ -1975,21 +1961,21 @@ class UIController(QWidget):
 
     def UpdateSystemSettingsUI(self):
 
-        self.runDetectBtn.setChecked(runDetect.value)
-        self.showPos2DBtn.setChecked(showPos2D.value)
-        self.triangulateBtn.setChecked(triangulate.value)
-        if triangulate.value:
+        self.runDetectBtn.setChecked(self.runDetect.value)
+        self.showPos2DBtn.setChecked(self.showPos2D.value)
+        self.triangulateBtn.setChecked(self.triangulate.value)
+        if self.triangulate.value:
             self.sendPos3DBtn.setEnabled(True)
-            self.sendPos3DBtn.setChecked(sendPos3D.value)
-        self.runDLCBtn.setChecked(runDLC.value)
-        if runDLC.value:
+            self.sendPos3DBtn.setChecked(self.sendPos3D.value)
+        self.runDLCBtn.setChecked(self.runDLC.value)
+        if self.runDLC.value:
             self.showDLCBtn.setEnabled(True)
-            self.showDLCBtn.setChecked(showDLC.value)
-        self.imgModeCombo0.setCurrentIndex(self.imgType0.index(imgModes[0]))
-        self.imgModeCombo1.setCurrentIndex(self.imgType1.index(imgModes[1]))
-        self.speciesNameCombo.setCurrentIndex(self.trackInst.speciesNameList.index(speciesName.value))
+            self.showDLCBtn.setChecked(self.showDLC.value)
+        self.imgModeCombo0.setCurrentIndex(self.imgType0.index(self.imgModes[0]))
+        self.imgModeCombo1.setCurrentIndex(self.imgType1.index(self.imgModes[1]))
+        self.speciesNameCombo.setCurrentIndex(self.trackInst.settings.speciesNameList.index(self.speciesName.value))
 
-        self.saveResultsChk.setChecked(saveResults.value)
+        self.saveResultsChk.setChecked(self.saveResults.value)
 
         self.log.LogText(2, 'UpdateSystemSettingsUI: done')
 
@@ -2003,28 +1989,28 @@ class UIController(QWidget):
         self.expID = QLabel('Experiment', self)
         self.expID.setGeometry(posX, posY, 100, 20)
         self.textExpID = QLineEdit(self)
-        self.textExpID.setText(expID.value)
+        self.textExpID.setText(self.expID.value)
         self.textExpID.setGeometry(posX + 90, posY, 150, 20)
         posY += 25
         # Subject ID
         self.subjID = QLabel('Subject', self)
         self.subjID.setGeometry(posX, posY, 100, 20)
         self.textSubjID = QLineEdit(self)
-        self.textSubjID.setText(subjectID.value)
+        self.textSubjID.setText(self.subjectID.value)
         self.textSubjID.setGeometry(posX + 90, posY, 150, 20)
         posY += 25
         # TrialID
         self.trialID = QLabel('Trial', self)
         self.trialID.setGeometry(posX, posY, 100, 20)
         self.textTrialID = QLineEdit(self)
-        self.textTrialID.setText(trialID.value)
+        self.textTrialID.setText(self.trialID.value)
         self.textTrialID.setGeometry(posX + 90, posY, 150, 20)
         posY += 25
         # ConditionID
         self.condID = QLabel('Condition', self)
         self.condID.setGeometry(posX, posY, 100, 20)
         self.textCondID = QLineEdit(self)
-        self.textCondID.setText(condID.value)
+        self.textCondID.setText(self.condID.value)
         self.textCondID.setGeometry(posX + 90, posY, 150, 20)
         posY += 30
 
@@ -2032,11 +2018,11 @@ class UIController(QWidget):
 
     def UpdateExperimentSettingsUI(self):
 
-        # self.textExpID.setText(expID.value)
-        # self.textSubjID.setText(subjectID.value)
-        # self.textTrialID.setText(trialID.value)
-        # self.textCondID.setText(condID.value)
-        self.saveResultsChk.setChecked(saveResults.value)
+        # self.textExpID.setText(self.expID.value)
+        # self.textSubjID.setText(self.subjectID.value)
+        # self.textTrialID.setText(self.trialID.value)
+        # self.textCondID.setText(self.condID.value)
+        self.saveResultsChk.setChecked(self.saveResults.value)
 
         self.log.LogText(2, 'UpdateExperimentSettingsUI: done')
 
@@ -2081,7 +2067,7 @@ class UIController(QWidget):
         self.saveResultsChk = QCheckBox('Save results', self)
         self.saveResultsChk.setGeometry(posX + 100, posY, 180, 30)
         self.saveResultsChk.setCheckable(True)
-        self.saveResultsChk.setChecked(saveResults.value)
+        self.saveResultsChk.setChecked(self.saveResults.value)
         self.saveResultsChk.setEnabled(True)
         self.saveResultsChk.clicked.connect(self.SaveResults)
         posY += 30
@@ -2089,10 +2075,10 @@ class UIController(QWidget):
         return posY
 
     def SpeciesNames(self):
-        speciesName.value = self.speciesNameCombo.currentText()
+        self.speciesName.value = self.speciesNameCombo.currentText()
 
     def ImgModes(self):
-        imgModes[:] = [self.imgModeCombo0.currentText(), self.imgModeCombo1.currentText()]
+        self.imgModes[:] = [self.imgModeCombo0.currentText(), self.imgModeCombo1.currentText()]
 
     def StartExperiment(self):
         # Disable the monitoring when a trial is started
@@ -2103,7 +2089,7 @@ class UIController(QWidget):
         self.endExpBtn.setCheckable(True)
         self.endExpBtn.setChecked(False)
         self.startTrialBtn.setEnabled(True)
-        self.newRefBtn.setEnabled(runDetect.value)      # Enable newRef button if runDetect is True
+        self.newRefBtn.setEnabled(self.runDetect.value)      # Enable newRef button if runDetect is True
         self.runDLCBtn.setEnabled(False)
         self.runDetectBtn.setEnabled(False)
         self.triangulateBtn.setEnabled(False)
@@ -2169,8 +2155,8 @@ class UIController(QWidget):
         if self.runDetectBtn.isChecked():
             self.imgModeTxt1.setEnabled(True)
             self.imgModeCombo1.setEnabled(True)
-            imgModes[1] = 'diff'
-            if not runDLC.value:
+            self.imgModes[1] = 'diff'
+            if not self.runDLC.value:
                 self.showPos2DBtn.setChecked(True)
                 self.showPos2DBtn.setEnabled(True)
                 self.triangulateBtn.setChecked(True)
@@ -2180,20 +2166,20 @@ class UIController(QWidget):
         else:
             self.imgModeTxt1.setEnabled(False)
             self.imgModeCombo1.setEnabled(False)
-            imgModes[1] = 'none'
+            self.imgModes[1] = 'none'
             self.newRefBtn.setEnabled(False)
-            if not runDLC.value:
+            if not self.runDLC.value:
                 self.showPos2DBtn.setChecked(False)
                 self.showPos2DBtn.setEnabled(False)
                 self.triangulateBtn.setChecked(False)
                 self.triangulateBtn.setEnabled(False)
                 self.sendPos3DBtn.setChecked(False)
                 self.sendPos3DBtn.setEnabled(False)
-        self.imgModeCombo1.setCurrentIndex(self.imgType1.index(imgModes[1]))
-        runDetect.value = self.runDetectBtn.isChecked()
-        showPos2D.value = self.showPos2DBtn.isChecked()
-        triangulate.value = self.triangulateBtn.isChecked()
-        sendPos3D.value = self.sendPos3DBtn.isChecked()
+        self.imgModeCombo1.setCurrentIndex(self.imgType1.index(self.imgModes[1]))
+        self.runDetect.value = self.runDetectBtn.isChecked()
+        self.showPos2D.value = self.showPos2DBtn.isChecked()
+        self.triangulate.value = self.triangulateBtn.isChecked()
+        self.sendPos3D.value = self.sendPos3DBtn.isChecked()
 
     def RunDLC(self):
         if self.runDLCBtn.isChecked():
@@ -2201,7 +2187,7 @@ class UIController(QWidget):
             self.showDLCBtn.setEnabled(True)
             self.useCyclopChk.setChecked(True)
             self.useCyclopChk.setEnabled(True)
-            if not runDetect.value:
+            if not self.runDetect.value:
                 self.showPos2DBtn.setChecked(True)
                 self.showPos2DBtn.setEnabled(True)
                 self.triangulateBtn.setChecked(True)
@@ -2213,28 +2199,28 @@ class UIController(QWidget):
             self.showDLCBtn.setEnabled(False)
             self.useCyclopChk.setChecked(False)
             self.useCyclopChk.setEnabled(False)
-            if not runDetect.value:
+            if not self.runDetect.value:
                 self.showPos2DBtn.setChecked(False)
                 self.showPos2DBtn.setEnabled(False)
                 self.triangulateBtn.setChecked(False)
                 self.triangulateBtn.setEnabled(False)
                 self.sendPos3DBtn.setChecked(False)
                 self.sendPos3DBtn.setEnabled(False)
-        runDLC.value = self.runDLCBtn.isChecked()
-        showDLC.value = self.showDLCBtn.isChecked()
-        showPos2D.value = self.showPos2DBtn.isChecked()
-        useCyclop.value = self.useCyclopChk.isChecked()
-        triangulate.value = self.triangulateBtn.isChecked()
-        sendPos3D.value = self.sendPos3DBtn.isChecked()
+        self.runDLC.value = self.runDLCBtn.isChecked()
+        self.showDLC.value = self.showDLCBtn.isChecked()
+        self.showPos2D.value = self.showPos2DBtn.isChecked()
+        self.useCyclop.value = self.useCyclopChk.isChecked()
+        self.triangulate.value = self.triangulateBtn.isChecked()
+        self.sendPos3D.value = self.sendPos3DBtn.isChecked()
 
     def ShowPos2D(self):
-        showPos2D.value = self.showPos2DBtn.isChecked()
+        self.showPos2D.value = self.showPos2DBtn.isChecked()
 
     def ShowDLC(self):
-        showDLC.value = self.showDLCBtn.isChecked()
+        self.showDLC.value = self.showDLCBtn.isChecked()
 
     def UseCyclop(self):
-        useCyclop.value = self.useCyclopChk.isChecked()
+        self.useCyclop.value = self.useCyclopChk.isChecked()
 
     def Triangulate(self):
         if self.triangulateBtn.isChecked():
@@ -2243,11 +2229,11 @@ class UIController(QWidget):
         else:
             self.sendPos3DBtn.setChecked(False)
             self.sendPos3DBtn.setEnabled(False)
-        triangulate.value = self.triangulateBtn.isChecked()
-        sendPos3D.value = self.sendPos3DBtn.isChecked()
+        self.triangulate.value = self.triangulateBtn.isChecked()
+        self.sendPos3D.value = self.sendPos3DBtn.isChecked()
 
     def SendPos3D(self):
-        sendPos3D.value = self.sendPos3DBtn.isChecked()
+        self.sendPos3D.value = self.sendPos3DBtn.isChecked()
 
     def LoadSettings(self):
         self.SendCommandTCPTracking('loadSettings')
@@ -2256,7 +2242,7 @@ class UIController(QWidget):
         self.UpdateExperimentSettingsUI()
 
     def SaveResults(self):
-        saveResults.value = self.saveResultsChk.isChecked()
+        self.saveResults.value = self.saveResultsChk.isChecked()
 
     def NewRef(self):
         self.SendCommandTCPTracking('newRef')
@@ -2272,8 +2258,8 @@ class UIController(QWidget):
         self.log.LogText(2, 'UIController: quit sent ("soft" quit when TCP server is up)')
 
         # Hard quit (if server is down)
-        stopRequest.value = True
-        quit.value = True
+        self.stopRequest.value = True
+        self.quit.value = True
         self.log.LogText(2, 'UIController: quit and stopAcquisition set to True ("hard" quit when TCP server is down)')
 
         QApplication.instance().quit
@@ -2346,4 +2332,9 @@ if __name__ == '__main__':
     # Move to TrackingMaster.py directory (if not already)
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+    # Multi-processing settings
+    mp.set_start_method('spawn')
+    mp.freeze_support()
+
+    # Start tracking
     myTracking = Tracking()

@@ -1,0 +1,24 @@
+logLevel		2				# Int: log verbose level of Tracking (0-4)
+controller		'UE'			# String: 'UE' for Unreal Engine (other PC) or 'UI' for user interface (this PC)
+
+# Detection modes and visualization
+speciesName		'Clownfish'		# String: name of the fish species to be tracked
+runDetect		False			# Bool: run position detection (could be False if getting DLC cyclop, see below)
+runDLC			True			# Bool: run DLC inferences on each camera frame
+triangulate		True			# Bool: triangulates 2D positions of cameras to get 3D positions
+showPos2D		False			# Bool: show animal tracking, needs either runDetect or runDLC enabled
+showDLC			True			# Bool: show DLC on cropped images, needs tracking and runDLC activated
+sendPos3D		True			# Bool: send 3D positions to Unreal based on detection or DLC (needs triangulate enabled)
+useCyclop		True			# Bool: use triangulated cyclop instead of detected positions when sending 3D positions (needs runDLC qnd getCyclop enabled)
+imgModes		['crop', 'none']	# List of 2 strings: image monitoring modes for upper and lower images ('crop', 'crop', 'diff', 'thresh', 'morph', 'none')
+
+# Results options
+saveResults		True			# Bool: save results or not (for debug)
+saveTextCopy	False			# Bool: save results as text files (readable) in addition to npy files
+
+# Directories
+calibDir		'Calibration/'		# String: directory with calibration matrices
+resultsDir		'../Results/'		# String: directory for results
+
+# List of fish species with trained DLC network
+speciesNameList	['Ostorhinchus_angustatus', 'Pomacentrus', 'Pristiapogon_exostigma', 'Dascyllus_flavi', 'Chromis', 'Clownfish', 'Dascyllus_3spots', 'Dascyllus_humbag', 'Maninis', 'Cod']

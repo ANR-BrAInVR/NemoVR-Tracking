@@ -88,7 +88,7 @@ class Tracking:
         self.serverRunning = mp.Value('B', False)            # TCP server on/off when True/False (used to launch the GUI)
         self.acquiring = mp.Array('B', [False] * self.camCount)        # Acquiring when True (for each camera)
         self.detectRunning = mp.Array('B', [False] * self.camCount)    # Detection running on all cameras (simple or blob detector)
-        self.DLCrunning = mp.Value('B', False)                       # DLC inferences running on all cameras
+        self.DLCrunning = mp.Value('B', False)                   # DLC inferences running on all cameras
         self.syncRequest = mp.Array('B', [False] * self.camCount)      # Synch request (reset startIndexes) when True (for each camera)
         self.newRefRequest = mp.Array('B', [False] * self.camCount)    # Request new reference images when True (for each camera)
         

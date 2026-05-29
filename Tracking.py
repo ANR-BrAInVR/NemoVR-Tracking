@@ -1283,8 +1283,8 @@ class Tracking:
                     imgIndexesPrev = self.imgIndexes[:]
 
                     # Gets current 2D position list and image index
-                    pos2Ds_copy = list(pos2Ds).copy()
-                    nFishDetect2D_copy = list(nFishDetect2D).copy()
+                    pos2Ds_copy = list(self.pos2Ds).copy()
+                    nFishDetect2D_copy = list(self.nFishDetect2D).copy()
                     imgIndex0 = self.imgIndexes[0]
 
                     # Temporary triangulated var
@@ -1296,7 +1296,7 @@ class Tracking:
                         pos3DlistStored = []
                         nFishDetect3Dstored = []
 
-                        self.log.LogText(3, 'Triangulation (imgIndexes=%s): nFishDetect[0]=%d, nFishDetect[1]=%d' % (str(imgIndexes), *nFishDetect2D_copy))
+                        self.log.LogText(3, 'Triangulation (imgIndexes=%s): nFishDetect[0]=%d, nFishDetect[1]=%d' % (str(self.imgIndexes), *nFishDetect2D_copy))
                         for pairList in pairLists:
 
                             # Remove pairs with undetected pos2D set to (0, 0)
@@ -1336,7 +1336,7 @@ class Tracking:
                         # Process valid pair lists stored
                         nValidPairLists = len(pairListStored)
                         if nValidPairLists == 0:          # Could not find a valid combination list
-                            self.log.LogText(3, 'Triangulation (imgIndexes=%s): could not find a pairList with all points remaining in the tank' % str(imgIndexes))
+                            self.log.LogText(3, 'Triangulation (imgIndexes=%s): could not find a pairList with all points remaining in the tank' % str(self.imgIndexes))
                             self.nFishDetect3D.value = 0
                             # pos3D[0] = np.zeros((self.nBlobsMax, 3))              # Take a list of (0,0,0)
                             # pos3D[0] = np.array([[0, 0, 7.5]]*self.nBlobsMax)     # Take a list of small tank center (0,0,7.5)
@@ -1352,7 +1352,7 @@ class Tracking:
 
                     else:
                         # Only one point per camera, triangulate single pair
-                        self.log.LogText(3, 'Triangulation (imgIndexes=%s): single pair of detected 2D positions' % str(imgIndexes))
+                        self.log.LogText(3, 'Triangulation (imgIndexes=%s): single pair of detected 2D positions' % str(self.imgIndexes))
                         if self.nFishDetect2D[0] != 0 and self.nFishDetect2D[1] != 0:
                             pos2Dpair = np.vstack((pos2Ds_copy[0][0, :], pos2Ds_copy[1][0, :]))       # Get pair
                             pos3Dpair = Triangulate(pos2Dpair)                              # Triangulates
@@ -1378,10 +1378,10 @@ class Tracking:
                 if imgIndexesPrev_DLC != self.imgIndexes_DLC[:]:     # and self.imgIndexes_DLC[0] == self.imgIndexes_DLC[1]:
                     imgIndexesPrev_DLC = self.imgIndexes_DLC[:]
 
-                    self.log.LogText(3, 'Triangulation (imgIndexes=%s): processing DLC keys' % str(imgIndexes))
+                    self.log.LogText(3, 'Triangulation (imgIndexes=%s): processing DLC keys' % str(self.imgIndexes))
 
                     # Gets current 2D DLC position list and image index
-                    pos2Ds_DLC_copy = np.copy(pos2Ds_DLC)                   # Get copy of inferred positions of all cameras
+                    pos2Ds_DLC_copy = np.copy(self.pos2Ds_DLC)                   # Get copy of inferred positions of all cameras
                     imgIndex0_DLC = self.imgIndexes_DLC[0]
 
                     # Temporary keys triangulated var
@@ -1397,10 +1397,10 @@ class Tracking:
                     self.pos3Ds_DLC[0] = pos3Ds_DLC_tmp                      # Stores output in manager
                     self.imgIndexPos3D_DLC.value = imgIndex0_DLC             # Takes first camera index
 
-                    self.log.LogText(3, 'Triangulation (imgIndexes=%s): processing cyclop' % str(imgIndexes))
+                    self.log.LogText(3, 'Triangulation (imgIndexes=%s): processing cyclop' % str(self.imgIndexes))
 
                     # Gets current 2D cyclop position list
-                    pos2D_cyclop_copy = np.copy(pos2D_cyclop)           # Get copy of cyclop positions of all cameras
+                    pos2D_cyclop_copy = np.copy(self.pos2D_cyclop)           # Get copy of cyclop positions of all cameras
 
                     # Temporary cyclop triangulated var
                     pos3D_cyclop_tmp = np.zeros(4)
@@ -1826,7 +1826,7 @@ class UIController(QWidget):
 
         # UI shared controller vars
         UImode = self_tracking.settings.controller == 'UI'
-        if c:
+        if UImode:
             self.expID = self_tracking.expID
             self.subjectID = self_tracking.subjectID
             self.trialID = self_tracking.subjectID
@@ -1840,7 +1840,7 @@ class UIController(QWidget):
         self.useCyclop = self_tracking.useCyclop
         self.sendPos3D = self_tracking.sendPos3D
         self.saveResults = self_tracking.saveResults
-        self.imgModes = manager.list(self.settings.imgModes)       # Image monitoring modes (2 max among full, crop, thresh, morph depending on detector)
+        self.imgModes = self_tracking.imgModes
 
         self.self_tracking = self_tracking
 

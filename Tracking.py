@@ -5,6 +5,7 @@ Created on Mon May 11 12:30:45 2022
 @authors: Manuel
 
 TODO:
+- move the UI into the Tracking class so that you don't have to readdress the MP tools
 - TCP server multi-client...
 + multi-animal triangulation and the identification problem:
  (-) reuse last valid combination first, probably works for the next frame (not necessary with nFish==1)

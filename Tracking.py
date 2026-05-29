@@ -230,11 +230,11 @@ class Tracking:
     def LoadSettingsFile(self, settingsName, storeVariable='self'):
         """Loads specific settings to self or another object's attributes"""
 
-        fname = os.path.join('Settings', settingsName + '.txt')
-        if not os.path.isfile(fname):
+        filename = os.path.join('Settings', settingsName + '.txt')
+        if not os.path.isfile(filename):
             return
 
-        with open(fname, 'r') as fSet:
+        with open(filename, 'r') as fSet:
             settingLines = fSet.readlines()
             for settingLine in settingLines:
                 settingArgs = re.split('\t+', settingLine)
@@ -242,7 +242,7 @@ class Tracking:
                     continue
                 exec("{}.{}={}".format(storeVariable, *settingArgs))
 
-        self.log.LogText(2, '"%s" loaded' % settingsName)
+        self.log.LogText(2, '\'%s\' loaded' % settingsName)
 
 
     def CheckSettings(self, atLoad=True):
@@ -1810,39 +1810,39 @@ class Tracking:
 
         self.log.LogText(1, 'StartGUI: creating UIController object')
         myQtApp = QApplication(sys.argv)
-        self.UI = UIController(trackInst=self)
+        self.UI = UIController(self_tracking=self)
         myQtApp.exec_()
 
 
 # GUI for tracking
 class UIController(QWidget):
 
-    def __init__(self, trackInst):
+    def __init__(self, self_tracking):
         """Constructor"""
 
         # Get log object
-        self.log = trackInst.log
+        self.log = self_tracking.log
         self.log.LogText(1, 'UIController() called')
 
         # UI shared controller vars
-        UImode = trackInst.settings.controller == 'UI'
-        if UIController:
-            self.expID = trackInst.expID
-            self.subjectID = trackInst.subjectID
-            self.trialID = trackInst.subjectID
-            self.condID = trackInst.subjectID
-        self.speciesName = trackInst.speciesName
-        self.runDetect = trackInst.runDetect
-        self.runDLC = trackInst.runDLC
-        self.triangulate = trackInst.triangulate
-        self.showPos2D = trackInst.showPos2D
-        self.showDLC = trackInst.showDLC
-        self.useCyclop = trackInst.useCyclop
-        self.sendPos3D = trackInst.sendPos3D
-        self.saveResults = trackInst.saveResults
+        UImode = self_tracking.settings.controller == 'UI'
+        if c:
+            self.expID = self_tracking.expID
+            self.subjectID = self_tracking.subjectID
+            self.trialID = self_tracking.subjectID
+            self.condID = self_tracking.subjectID
+        self.speciesName = self_tracking.speciesName
+        self.runDetect = self_tracking.runDetect
+        self.runDLC = self_tracking.runDLC
+        self.triangulate = self_tracking.triangulate
+        self.showPos2D = self_tracking.showPos2D
+        self.showDLC = self_tracking.showDLC
+        self.useCyclop = self_tracking.useCyclop
+        self.sendPos3D = self_tracking.sendPos3D
+        self.saveResults = self_tracking.saveResults
         self.imgModes = manager.list(self.settings.imgModes)       # Image monitoring modes (2 max among full, crop, thresh, morph depending on detector)
 
-        self.trackInst = trackInst
+        self.self_tracking = self_tracking
 
         super().__init__()
 
@@ -1871,9 +1871,9 @@ class UIController(QWidget):
         self.speciesNameTxt = QLabel('Species', self)
         self.speciesNameTxt.setGeometry(posX+20, posY, 120, 30)
         self.speciesNameCombo = QComboBox(self)
-        self.speciesNameCombo.addItems(self.trackInst.settings.speciesNameList)
+        self.speciesNameCombo.addItems(self.self_tracking.settings.speciesNameList)
         self.speciesNameCombo.setGeometry(posX + 150, posY, 90, 30)
-        self.speciesNameCombo.setCurrentIndex(self.trackInst.settings.speciesNameList.index(self.speciesName.value))
+        self.speciesNameCombo.setCurrentIndex(self.self_tracking.settings.speciesNameList.index(self.speciesName.value))
         self.speciesNameCombo.currentIndexChanged.connect(self.SpeciesNames)
         posY += 35
         # Run detection
@@ -1994,7 +1994,7 @@ class UIController(QWidget):
             self.showDLCBtn.setChecked(self.showDLC.value)
         self.imgModeCombo0.setCurrentIndex(self.imgType0.index(self.imgModes[0]))
         self.imgModeCombo1.setCurrentIndex(self.imgType1.index(self.imgModes[1]))
-        self.speciesNameCombo.setCurrentIndex(self.trackInst.settings.speciesNameList.index(self.speciesName.value))
+        self.speciesNameCombo.setCurrentIndex(self.self_tracking.settings.speciesNameList.index(self.speciesName.value))
 
         self.saveResultsChk.setChecked(self.saveResults.value)
 

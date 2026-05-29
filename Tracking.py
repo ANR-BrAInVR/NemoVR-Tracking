@@ -2316,7 +2316,7 @@ class Log:
     def __init__(self, logLevel=int, showTime=True, __output=''):
         """Use output='' for console writing"""
 
-        self.__lock = mp.Lock()          # threading.Lock()
+        # self.__lock = mp.Lock()          # threading.Lock()
         self.logLevel = logLevel
         self.showTime = showTime
         if showTime:
@@ -2330,7 +2330,7 @@ class Log:
 
     def __del__(self):  # Called when destroying object
 
-        del self.__lock
+        # del self.__lock
         if self.__outToFile:
             sys.stdout.flush()
             sys.stdout = self.__stdoutCopy
@@ -2338,13 +2338,13 @@ class Log:
     def LogText(self, level, text):
 
         if self.logLevel >= level:
-            self.__lock.acquire()
+            # self.__lock.acquire()
             if self.showTime:
                 t = float(time.time_ns() - self.startTime) / 1E9
                 print('%10.6f\t' % t + '  ' * (level - 1) + text)
             else:
                 print('  ' * (level - 1) + text)
-            self.__lock.release()
+            # self.__lock.release()
 
 
 # Starts everything (if this is the main process)

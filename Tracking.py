@@ -63,6 +63,8 @@ pairLists = []
 class Settings:
     owner = None
 
+GUIprocess = None
+
 # Tracking that detects 2D positions of fish for each camera, triangulates and runs DLC on cropped images
 class Tracking:
 
@@ -157,8 +159,9 @@ class Tracking:
         time.sleep(0.1)
 
         # Starts GUI
-        self.GUIproc = mp.Process(target=self.StartGUI)
-        self.GUIproc.start()
+        mp.Process(target=self.StartGUI).start()
+        # self.GUIprocess = mp.Process(target=self.StartGUI)       # Cannot pickle self if a process is stored in self
+        # self.GUIprocess.start()
         self.log.LogText(2, 'Tracking: GUI process started')
 
         while True:
@@ -201,16 +204,14 @@ class Tracking:
     def __del__(self):
         """Destructor"""
 
-        self.log.LogText(1, 'Tracking destructor called')
+        # Destructor is called each time a process ends (in spawn mode...)
+        self.log.LogText(3, 'Tracking destructor called')
 
         # Close openCV windows if any
         cv2.destroyAllWindows()
 
         # Quit GUI if still there
-        self.GUIproc.kill()
-
-        # Give time for processes to end
-        time.sleep(0.5)
+        # self.GUIprocess.kill()
 
     def LoadSettings(self):
         """Loads settings files"""
@@ -243,7 +244,6 @@ class Tracking:
                 exec("{}.{}={}".format(storeVariable, *settingArgs))
 
         self.log.LogText(2, '\'%s\' loaded' % settingsName)
-
 
     def CheckSettings(self, atLoad=True):
         """Run sanity check on loaded settings"""
@@ -367,14 +367,14 @@ class Tracking:
         processList = []
 
         # Start video processing to get full and cropped images (one per camera)
-        VideoCaptureProcs = []
+        videoCaptureProcs = []
         self.acquiring[:self.camCount] = [False] * self.camCount
         for camInd in range(self.camCount):
-            VideoCaptureProcs.append(mp.Process(target=self.VideoCapture, args=(camInd,)))
+            videoCaptureProcs.append(mp.Process(target=self.VideoCapture, args=(camInd,)))
         time.sleep(0.1)
         for camInd in range(self.camCount):
-            VideoCaptureProcs[camInd].start()
-        processList.extend(VideoCaptureProcs)
+            videoCaptureProcs[camInd].start()
+        processList.extend(videoCaptureProcs)
 
         # Waits that all video processing processes are acquiring from cameras
         t0 = time.perf_counter()
@@ -396,7 +396,7 @@ class Tracking:
         if self.runDetect.value:
             self.detectRunning[:self.camCount] = [False] * self.camCount
             for camInd in range(self.camCount):
-                runDetectProcs.append(mp.Process(target=self.RunDetect, args=(camInd, )))
+                runDetectProcs.append(mp.Process(target=self.RunDetect, args=(camInd,)))
             time.sleep(0.1)
             for camInd in range(self.camCount):
                 runDetectProcs[camInd].start()
@@ -417,7 +417,7 @@ class Tracking:
             # Start triangulation process (only one)
             if self.triangulate.value:
                 self.log.LogText(1, 'Start: start triangulation')
-                triangulationProc = mp.Process(target=self.Triangulation)  # pCutoff not used (image thresholding only)
+                triangulationProc = mp.Process(target=self.Triangulation)       # pCutoff not used (image thresholding only)
                 triangulationProc.start()
                 processList.append(triangulationProc)
             time.sleep(0.25)
@@ -639,6 +639,145 @@ class Tracking:
             cv2.imshow(windowName, imgPanel)
             cv2.moveWindow(windowName, 340, 0)      # TODO: move window but allow user to move it
             cv2.waitKey(1)
+
+    # TCP server receiving commands from Rendering PC (THREAD)
+    def TCPserver(self, cmdSeparator='\t'):
+        """TCP server receiving commands from Rendering PC and GUI(THREAD)"""
+
+        self.log.LogText(1, 'TCPserver() thread running (waiting for Rendering commands)')
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as serverSocket:
+
+            # Binds TCP server to the correct port
+            while True:
+                try:
+                    serverSocket.bind(TCPserverTracking)
+                except socket.error as errorMsg:
+                    self.log.LogText(2, 'TCPserver: could not bind with server address, retrying in 1s')
+                    time.sleep(1)
+                    continue
+                break
+
+            self.log.LogText(2, 'TCPserver: up and running waiting for connections')
+            self.serverRunning.value = True         # Creates GUI once TCP server is running
+
+            while True:
+
+                # Waits for client to connect
+                self.log.LogText(2, 'TCPserver: listening on %s...' % str(TCPserverTracking))
+                serverSocket.listen()
+                try:
+                    clientSocket, clientAddress = serverSocket.accept()
+                except socket.error as errorMsg:
+                    self.log.LogText(2, 'TCPserver: connection error: %s' % errorMsg)
+                    serverSocket.close()
+                    self.quit.value = True
+                    return 0
+                self.log.LogText(2, 'TCPserver: connected to client %s' % str(clientAddress))
+
+                with clientSocket:
+
+                    # Reads message (one chunks)
+                    try:
+                        msg = clientSocket.recv(TCPpacketSize)      # Reads next chunk
+                    except socket.error as errorMsg:
+                        self.log.LogText(2, 'TCPserver: reception error: %s, ignoring' % errorMsg)
+                        msg = b''
+                    if not msg:         # Empty message: end of transmission
+                        clientSocket.close()  # Close client connection
+                        self.log.LogText(2, 'TCPserver: closing client connection')
+                        continue
+
+                    # Acknowledge reception
+                    # clientSocket.sendall(('TCPserver on Tracking: message received').encode())
+
+                    # Reads and processes list of commands
+                    cmdList = msg.decode('utf-8').split(cmdSeparator)
+                    for cmd in cmdList:
+                        if not len(cmd): break
+
+                        self.log.LogText(2, 'TCPserver: command=\'%s\'' % cmd)
+                        # Process start, stop and quit commands (dispatched to other threads)
+                        if cmd == 'startExperiment':
+                            self.log.LogText(2, 'TCPserver: \'startExperiment\' received from rendering')
+                            self.CheckSettings(atLoad=False)        # Check if current settings are ok
+                            self.dataRecording.value = False
+                            self.startRequest.value = True
+                        elif cmd == 'endExperiment':
+                            self.log.LogText(2, 'TCPserver: \'endExperiment\' received from rendering')
+                            self.dataRecording.value = False
+                            self.stopRequest.value = True
+                        elif cmd == 'startTrial':
+                            if len(self.expID.value) > 0 and len(self.subjectID.value) > 0 and len(self.trialID.value) > 0 and len(self.condID.value) > 0:
+                                self.log.LogText(2, 'TCPserver: \'startTrial\' received from rendering')
+                                self.log.LogText(2, '  with expID=%s, subjectID=%s, trialID=%s, condID=%s (saveResults=%s, recVideos=%s)' % (self.expID.value, self.subjectID.value, self.trialID.value, self.condID.value, self.saveResults.value, self.recVideos.value))
+                                # Sync image indexes between cameras
+                                self.syncRequest[:self.camCount] = [True] * self.camCount
+                                while self.syncRequest[:self.camCount] != [False] * self.camCount: pass
+                                time.sleep(0.05)
+                                # Start recording data
+                                if self.saveResults.value:
+                                    self.dataRecording.value = True
+                                self.trialStarted.value = True
+                                # eventString[0] = 'startTrial'
+                            else:
+                                self.log.LogText(2, 'TCPserver: \'startTrial\' received but ignored, send expID, subjectID, trialID, condID first')
+                        elif cmd == 'endTrial':
+                            self.log.LogText(2, 'TCPserver: \'endTrial\' received from rendering')
+                            # eventString[0] = 'endTrial'
+                            self.dataRecording.value = False
+                            self.trialStarted.value = False
+                        elif cmd == 'quit':
+                            self.log.LogText(2, 'TCPserver: \'quit\' received')
+                            self.quit.value = True
+                            self.stopRequest.value = True
+                            clientSocket.close()
+                            serverSocket.close()
+                            return 0
+
+                        # From here on parameters cannot be set if trial started ongoing
+                        elif self.trialStarted.value:
+                            self.log.LogText(3, 'TCPserver: trial started, command \'%s\' will be ignored' % cmd)
+
+                        # Ask for new reference images
+                        elif cmd == 'newRef':
+                            self.log.LogText(2, 'TCPserver: \'newRef\' received from rendering')
+                            self.newRefRequest[:self.camCount] = [True] * self.camCount
+
+                        # Reload settings
+                        elif cmd == 'loadSettings':
+                            self.log.LogText(2, 'TCPserver: \'loadSettings\' received from rendering')
+                            self.LoadSettings()
+                            self.CheckSettings(atLoad=True)   # Run sanity check for newly loaded settings
+
+                        # Loads experiment parameters
+                        elif 'expID' in cmd:
+                            val = cmd.split(sep='=')[1]
+                            self.log.LogText(2, 'TCPserver: self.expID=\'%s\'' % val)
+                            exec('self.expID.value=\'%s\'' % val)
+                        elif 'subjectID' in cmd:
+                            val = cmd.split(sep='=')[1]
+                            self.log.LogText(2, 'TCPserver: self.subjectID=\'%s\'' % val)
+                            exec('self.subjectID.value=\'%s\'' % val)
+                        elif 'trialID' in cmd:
+                            val = cmd.split(sep='=')[1]
+                            self.log.LogText(2, 'TCPserver: self.trialID=\'%s\'' % val)
+                            exec('self.trialID.value=\'%s\'' % val)
+                        elif 'condID' in cmd:
+                            val = cmd.split(sep='=')[1]
+                            self.log.LogText(2, 'TCPserver: self.condID=\'%s\'' % val)
+                            exec('self.condID.value=\'%s\'' % val)
+                        elif 'recVideos' in cmd:
+                            val = cmd.split(sep='=')[1]
+                            self.log.LogText(2, 'TCPserver: self.recVideos=\'%s\'' % val)
+                            exec('self.recVideos.value=%s' % val)
+                            # exec('self.recVideos.value=%d' % 1 if (val == 'true') else 0)      # True in UE is true:::
+                            # exec('self.recVideos.value=%s' % (val == 'true'))      # True in UE is true:::
+                            self.log.LogText(2, 'TCPserver: self.recVideos=%s' % self.recVideos.value)
+
+                        # Unknown command
+                        else:
+                            self.log.LogText(3, 'TCPserver: command not understood \'%s\'' % cmd)
 
     # Ximea camera video capture (PROCESS)
     def VideoCapture(self, camInd, showPerfs=False):
@@ -1109,31 +1248,32 @@ class Tracking:
 
         # DLC neural network initialization
         if True:
-            import tensorflow as tf
-            from dlclive import DLCLive
+            from dlclive import DLCLive, Processor
 
             # DLC inferred Markers vars
-            keyCyclopInds = [list(self.keynames).index(keyName) for keyName in self.keyCyclop]
+            keyCyclopInds = [list(self.keyNames).index(keyName) for keyName in self.keyCyclop]
 
-            # Limite l'expansion abusive de la mémoire par Tensor flow :
-            #   - entre 0 et 1, fraction de la mémoire de la carte graphique
-            #   - si le même réseau pour tous les process, c'est la même mémoire pour tous, sinon pour chaque réseau
-            #   - ne fonctionne pas avec TF RT
-            GPUoptions = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.3)
-            config = tf.compat.v1.ConfigProto(gpu_options=GPUoptions)
+            if self.modelType == 'base':
+                import tensorflow as tf
+                # Limite l'expansion abusive de la mémoire par Tensor flow :
+                #   - entre 0 et 1, fraction de la mémoire de la carte graphique
+                #   - si le même réseau pour tous les process, c'est la même mémoire pour tous, sinon pour chaque réseau
+                #   - ne fonctionne pas avec TF RT
+                GPUoptions = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.3)
+                config = tf.compat.v1.ConfigProto(gpu_options=GPUoptions)
 
-            # Pour TF 1.5 :
-            # GPUoptions = tf.GPUOptions(per_process_gpu_memory_fraction=0.3)
-            # config = tf.ConfigProto(GPUoptions=GPUoptions)
+                # Choix du réseau (parmis ceux entrainés) :
+                # - dossier du réseau
+                # - model_type : base (avec GPU), tensorrt (plus performant, avec GPU), tflite (CPU, pas recommandé)
+                # - tf_config : configuration définie juste au dessus (limitation mémoire)
+                # - processor : Processor() (peut être redéfini pour ajouter du filtrage prédictif par exemple)
+                # - display : pour tracer des points (pas encore trouvé comment, pas utilisé)
+                dlc_live = DLCLive(self.neuralNetDir, model_type='base', tf_config=config, processor=Processor, display=False)
 
-            # Choix du réseau (parmis ceux entrainés) :
-            # - dossier du réseau
-            # - model_type : base (avec GPU), tensorrt (plus performant, avec GPU), tflite (CPU, pas recommandé)
-            # - tf_config : configuration définie juste au dessus (limitation mémoire)
-            # - processor : Processor() (peut être redéfini pour ajouter du filtrage prédictif par exemple)
-            # - display : pour tracer des points (pas encore trouvé comment, pas utilisé)
-            # dlc_live = DLCLive(self.neuralNetDir, model_type=optimisation, tf_config=config, processor=Processor(), display=False)
-            dlc_live = DLCLive(self.neuralNetDir, model_type=self.optimization, tf_config=config, display=False)
+            elif self.modelType == 'pytorch':
+                print('\nSTART\n')
+                dlc_live = DLCLive(self.neuralNetDir, model_type='pytorch', processor=Processor, display=False)
+                print('\nDONE\n')
 
             # Initialize weights with black image (0 info)
             dlc_live.init_inference(np.zeros(self.imgCropDim))        # self.cropSize for 1 channel
@@ -1199,6 +1339,7 @@ class Tracking:
         self.log.LogText(1, 'RunDLC: all DLC_inference threads have been launched, quitting')
         return
 
+    # Triangulates pairs of 2D detected positions (PROCESS)
     def Triangulation(self):
         """Triangulates across valid 2D positions (PROCESS)"""
 
@@ -1666,151 +1807,12 @@ class Tracking:
                 dataRecordingPrev = False
                 self.dataRecording.value = False
 
-    # TCP server receiving commands from Rendering PC (THREAD)
-    def TCPserver(self, cmdSeparator='\t'):
-        """TCP server receiving commands from Rendering PC and GUI(THREAD)"""
-
-        self.log.LogText(1, 'TCPserver() thread running (waiting for Rendering commands)')
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as serverSocket:
-
-            # Binds TCP server to the correct port
-            while True:
-                try:
-                    serverSocket.bind(TCPserverTracking)
-                except socket.error as errorMsg:
-                    self.log.LogText(2, 'TCPserver: could not bind with server address, retrying in 1s')
-                    time.sleep(1)
-                    continue
-                break
-
-            self.log.LogText(2, 'TCPserver: up and running waiting for connections')
-            self.serverRunning.value = True         # Creates GUI once TCP server is running
-
-            while True:
-
-                # Waits for client to connect
-                self.log.LogText(2, 'TCPserver: listening on %s...' % str(TCPserverTracking))
-                serverSocket.listen()
-                try:
-                    clientSocket, clientAddress = serverSocket.accept()
-                except socket.error as errorMsg:
-                    self.log.LogText(2, 'TCPserver: connection error: %s' % errorMsg)
-                    serverSocket.close()
-                    self.quit.value = True
-                    return 0
-                self.log.LogText(2, 'TCPserver: connected to client %s' % str(clientAddress))
-
-                with clientSocket:
-
-                    # Reads message (one chunks)
-                    try:
-                        msg = clientSocket.recv(TCPpacketSize)      # Reads next chunk
-                    except socket.error as errorMsg:
-                        self.log.LogText(2, 'TCPserver: reception error: %s, ignoring' % errorMsg)
-                        msg = b''
-                    if not msg:         # Empty message: end of transmission
-                        clientSocket.close()  # Close client connection
-                        self.log.LogText(2, 'TCPserver: closing client connection')
-                        continue
-
-                    # Acknowledge reception
-                    # clientSocket.sendall(('TCPserver on Tracking: message received').encode())
-
-                    # Reads and processes list of commands
-                    cmdList = msg.decode('utf-8').split(cmdSeparator)
-                    for cmd in cmdList:
-                        if not len(cmd): break
-
-                        self.log.LogText(2, 'TCPserver: command=\'%s\'' % cmd)
-                        # Process start, stop and quit commands (dispatched to other threads)
-                        if cmd == 'startExperiment':
-                            self.log.LogText(2, 'TCPserver: \'startExperiment\' received from rendering')
-                            self.CheckSettings(atLoad=False)        # Check if current settings are ok
-                            self.dataRecording.value = False
-                            self.startRequest.value = True
-                        elif cmd == 'endExperiment':
-                            self.log.LogText(2, 'TCPserver: \'endExperiment\' received from rendering')
-                            self.dataRecording.value = False
-                            self.stopRequest.value = True
-                        elif cmd == 'startTrial':
-                            if len(self.expID.value) > 0 and len(self.subjectID.value) > 0 and len(self.trialID.value) > 0 and len(self.condID.value) > 0:
-                                self.log.LogText(2, 'TCPserver: \'startTrial\' received from rendering')
-                                self.log.LogText(2, '  with expID=%s, subjectID=%s, trialID=%s, condID=%s (saveResults=%s, recVideos=%s)' % (self.expID.value, self.subjectID.value, self.trialID.value, self.condID.value, self.saveResults.value, self.recVideos.value))
-                                # Sync image indexes between cameras
-                                self.syncRequest[:self.camCount] = [True] * self.camCount
-                                while self.syncRequest[:self.camCount] != [False] * self.camCount: pass
-                                time.sleep(0.05)
-                                # Start recording data
-                                if self.saveResults.value:
-                                    self.dataRecording.value = True
-                                self.trialStarted.value = True
-                                # eventString[0] = 'startTrial'
-                            else:
-                                self.log.LogText(2, 'TCPserver: \'startTrial\' received but ignored, send expID, subjectID, trialID, condID first')
-                        elif cmd == 'endTrial':
-                            self.log.LogText(2, 'TCPserver: \'endTrial\' received from rendering')
-                            # eventString[0] = 'endTrial'
-                            self.dataRecording.value = False
-                            self.trialStarted.value = False
-                        elif cmd == 'quit':
-                            self.log.LogText(2, 'TCPserver: \'quit\' received')
-                            self.quit.value = True
-                            self.stopRequest.value = True
-                            clientSocket.close()
-                            serverSocket.close()
-                            return 0
-
-                        # From here on parameters cannot be set if trial started ongoing
-                        elif self.trialStarted.value:
-                            self.log.LogText(3, 'TCPserver: trial started, command \'%s\' will be ignored' % cmd)
-
-                        # Ask for new reference images
-                        elif cmd == 'newRef':
-                            self.log.LogText(2, 'TCPserver: \'newRef\' received from rendering')
-                            self.newRefRequest[:self.camCount] = [True] * self.camCount
-
-                        # Reload settings
-                        elif cmd == 'loadSettings':
-                            self.log.LogText(2, 'TCPserver: \'loadSettings\' received from rendering')
-                            self.LoadSettings()
-                            self.CheckSettings(atLoad=True)   # Run sanity check for newly loaded settings
-
-                        # Loads experiment parameters
-                        elif 'expID' in cmd:
-                            val = cmd.split(sep='=')[1]
-                            self.log.LogText(2, 'TCPserver: self.expID=\'%s\'' % val)
-                            exec('self.expID.value=\'%s\'' % val)
-                        elif 'subjectID' in cmd:
-                            val = cmd.split(sep='=')[1]
-                            self.log.LogText(2, 'TCPserver: self.subjectID=\'%s\'' % val)
-                            exec('self.subjectID.value=\'%s\'' % val)
-                        elif 'trialID' in cmd:
-                            val = cmd.split(sep='=')[1]
-                            self.log.LogText(2, 'TCPserver: self.trialID=\'%s\'' % val)
-                            exec('self.trialID.value=\'%s\'' % val)
-                        elif 'condID' in cmd:
-                            val = cmd.split(sep='=')[1]
-                            self.log.LogText(2, 'TCPserver: self.condID=\'%s\'' % val)
-                            exec('self.condID.value=\'%s\'' % val)
-                        elif 'recVideos' in cmd:
-                            val = cmd.split(sep='=')[1]
-                            self.log.LogText(2, 'TCPserver: self.recVideos=\'%s\'' % val)
-                            exec('self.recVideos.value=%s' % val)
-                            # exec('self.recVideos.value=%d' % 1 if (val == 'true') else 0)      # True in UE is true:::
-                            # exec('self.recVideos.value=%s' % (val == 'true'))      # True in UE is true:::
-                            self.log.LogText(2, 'TCPserver: self.recVideos=%s' % self.recVideos.value)
-
-                        # Unknown command
-                        else:
-                            self.log.LogText(3, 'TCPserver: command not understood \'%s\'' % cmd)
-
-    # Lauchnes the Graphic User Interface
+    # Launches the Graphic User Interface (PROCESS)
     def StartGUI(self):
 
         self.log.LogText(1, 'StartGUI: creating UIController object')
         myQtApp = QApplication(sys.argv)
-        self.UI = UIController(self_tracking=self)
+        UI = UIController(self_tracking=self)
         myQtApp.exec_()
 
 
@@ -1842,6 +1844,7 @@ class UIController(QWidget):
         self.saveResults = self_tracking.saveResults
         self.imgModes = self_tracking.imgModes
 
+        self.settings = self_tracking.settings
         self.self_tracking = self_tracking
 
         super().__init__()
@@ -1849,14 +1852,14 @@ class UIController(QWidget):
         # Load section UIs
         prevY = self.SystemSettingsUI(posX=10, posY=0, UImode=UImode)
         if UImode:
-            prevY = self.ExperimentSettingsUI(posX=10, posY=prevY+20)
-            self.ControllerUI(posX=10, posY=prevY+20)
+            prevY = self.ExperimentSettingsUI(posX=10, posY=prevY+10)
+            self.ControllerUI(posX=10, posY=prevY+10)
 
         # Camera return visual
         self.panel = QLabel(self)
 
         # General aspect of the window
-        self.setFixedSize(260, 690 if UImode else 400)
+        self.setFixedSize(270, 700 if UImode else 400)
         self.move(10, 10)
         self.setWindowTitle('Tracking UI')
         self.show()
@@ -1871,9 +1874,9 @@ class UIController(QWidget):
         self.speciesNameTxt = QLabel('Species', self)
         self.speciesNameTxt.setGeometry(posX+20, posY, 120, 30)
         self.speciesNameCombo = QComboBox(self)
-        self.speciesNameCombo.addItems(self.self_tracking.settings.speciesNameList)
+        self.speciesNameCombo.addItems(self.settings.speciesNameList)
         self.speciesNameCombo.setGeometry(posX + 150, posY, 90, 30)
-        self.speciesNameCombo.setCurrentIndex(self.self_tracking.settings.speciesNameList.index(self.speciesName.value))
+        self.speciesNameCombo.setCurrentIndex(self.settings.speciesNameList.index(self.speciesName.value))
         self.speciesNameCombo.currentIndexChanged.connect(self.SpeciesNames)
         posY += 35
         # Run detection
@@ -1994,7 +1997,7 @@ class UIController(QWidget):
             self.showDLCBtn.setChecked(self.showDLC.value)
         self.imgModeCombo0.setCurrentIndex(self.imgType0.index(self.imgModes[0]))
         self.imgModeCombo1.setCurrentIndex(self.imgType1.index(self.imgModes[1]))
-        self.speciesNameCombo.setCurrentIndex(self.self_tracking.settings.speciesNameList.index(self.speciesName.value))
+        self.speciesNameCombo.setCurrentIndex(self.settings.speciesNameList.index(self.speciesName.value))
 
         self.saveResultsChk.setChecked(self.saveResults.value)
 
@@ -2007,32 +2010,32 @@ class UIController(QWidget):
         self.experimentSetLbl.setStyleSheet("font-weight: bold")
         posY += 40
         # Experiment ID
-        self.expID = QLabel('Experiment', self)
-        self.expID.setGeometry(posX, posY, 100, 20)
-        self.textExpID = QLineEdit(self)
-        self.textExpID.setText(self.expID.value)
-        self.textExpID.setGeometry(posX + 90, posY, 150, 20)
+        self.expID_label = QLabel('Experiment', self)
+        self.expID_label.setGeometry(posX, posY, 100, 20)
+        self.expID_text = QLineEdit(self)
+        self.expID_text.setText(self.expID.value)
+        self.expID_text.setGeometry(posX + 90, posY, 150, 20)
         posY += 25
         # Subject ID
-        self.subjID = QLabel('Subject', self)
-        self.subjID.setGeometry(posX, posY, 100, 20)
-        self.textSubjID = QLineEdit(self)
-        self.textSubjID.setText(self.subjectID.value)
-        self.textSubjID.setGeometry(posX + 90, posY, 150, 20)
+        self.subjID_label = QLabel('Subject', self)
+        self.subjID_label.setGeometry(posX, posY, 100, 20)
+        self.subjID_text = QLineEdit(self)
+        self.subjID_text.setText(self.subjectID.value)
+        self.subjID_text.setGeometry(posX + 90, posY, 150, 20)
         posY += 25
         # TrialID
-        self.trialID = QLabel('Trial', self)
-        self.trialID.setGeometry(posX, posY, 100, 20)
-        self.textTrialID = QLineEdit(self)
-        self.textTrialID.setText(self.trialID.value)
-        self.textTrialID.setGeometry(posX + 90, posY, 150, 20)
+        self.trialID_label = QLabel('Trial', self)
+        self.trialID_label.setGeometry(posX, posY, 100, 20)
+        self.trialID_text = QLineEdit(self)
+        self.trialID_text.setText(self.trialID.value)
+        self.trialID_text.setGeometry(posX + 90, posY, 150, 20)
         posY += 25
         # ConditionID
-        self.condID = QLabel('Condition', self)
-        self.condID.setGeometry(posX, posY, 100, 20)
-        self.textCondID = QLineEdit(self)
-        self.textCondID.setText(self.condID.value)
-        self.textCondID.setGeometry(posX + 90, posY, 150, 20)
+        self.condID_label = QLabel('Condition', self)
+        self.condID_label.setGeometry(posX, posY, 100, 20)
+        self.condID_text = QLineEdit(self)
+        self.condID_text.setText(self.condID.value)
+        self.condID_text.setGeometry(posX + 90, posY, 150, 20)
         posY += 30
 
         return posY
@@ -2146,15 +2149,15 @@ class UIController(QWidget):
         self.endTrialBtn.setEnabled(True)               # Enable endTrial button
         self.saveResultsChk.setEnabled(False)           # Disable saveResults checkbox
         # Disable experiment UI fields
-        self.textExpID.setEnabled(False)
-        self.textSubjID.setEnabled(False)
-        self.textTrialID.setEnabled(False)
-        self.textCondID.setEnabled(False)
+        self.expID_text.setEnabled(False)
+        self.subjID_text.setEnabled(False)
+        self.trialID_text.setEnabled(False)
+        self.condID_text.setEnabled(False)
         # Send commands to TCP server
-        self.SendCommandTCPTracking('expID=%s' % self.textExpID.text())
-        self.SendCommandTCPTracking('subjectID=%s' % self.textSubjID.text())
-        self.SendCommandTCPTracking('condID=%s' % self.textCondID.text())
-        self.SendCommandTCPTracking('trialID=%s' % self.textTrialID.text())
+        self.SendCommandTCPTracking('expID=%s' % self.expID_text.text())
+        self.SendCommandTCPTracking('subjectID=%s' % self.subjID_text.text())
+        self.SendCommandTCPTracking('condID=%s' % self.condID_text.text())
+        self.SendCommandTCPTracking('trialID=%s' % self.trialID_text.text())
         self.SendCommandTCPTracking('startTrial')
         self.log.LogText(2, 'UIController: startTrial sent')
 
@@ -2164,10 +2167,10 @@ class UIController(QWidget):
         self.startTrialBtn.setEnabled(True)         # Enable startTrial button
         self.saveResultsChk.setEnabled(True)        # Enable saveResults checkbox
         # Enable experiment UI fields
-        self.textExpID.setEnabled(True)
-        self.textSubjID.setEnabled(True)
-        self.textTrialID.setEnabled(True)
-        self.textCondID.setEnabled(True)
+        self.expID_text.setEnabled(True)
+        self.subjID_text.setEnabled(True)
+        self.trialID_text.setEnabled(True)
+        self.condID_text.setEnabled(True)
         # Send command to TCP server
         self.SendCommandTCPTracking('endTrial')
         self.log.LogText(2, 'UIController: endTrial sent')
@@ -2308,6 +2311,7 @@ class UIController(QWidget):
                 self.log.LogText(2, 'SendCommandTCPTracking: Sending error: %s, ignoring' % errorMsg)
                 return 0
             self.log.LogText(2, 'SendCommandTCPTracking: cmd=\'%s\' sent' % command)
+
 
 
 class Log:

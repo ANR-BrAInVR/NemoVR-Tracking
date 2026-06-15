@@ -7,7 +7,7 @@ excludeOutOfTank	False	# Bool: checks if triangulation results gets out of the t
 neuralNetDir	'../NeuralNetworks/Cod/efficient_net/'			        # String: neural net
 keyNames		['Snout', 'EyeL', 'EyeR', 'FinL', 'FinTipL', 'FinR', 'FinTipR', 'FinFront', 'FinMiddle', 'FinBack', 'Tail', 'TailTip']
 keyColors		[(255, 0, 0), (0, 255, 0), (0, 0, 255), (0, 160, 0), (0, 220, 0), (0, 0, 160), (0, 0, 220), (255, 0, 40), (255, 0, 80), (255, 0, 120), (255, 0, 160), (255, 0, 200)]
-optimization	'base'		# String: DLC optimization 'base' (tensorflow 2.5) or 'tensorrt' (GPU accelerated) or 'tflite' (CPU only)
+modelType		'pytorch'		# String: DLC model 'pytorch' (latest) or 'base' (tensorflow 2.5)
 pThresh			0.0 		# Minimum value of the inference probability to be considered valid
 
 # Additionnal motion analyses settings (requires runDLC=True except getVelocity)

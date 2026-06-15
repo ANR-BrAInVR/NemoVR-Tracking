@@ -7,7 +7,7 @@ excludeOutOfTank	False	# Bool: checks if triangulation results gets out of the t
 neuralNetDir	'../NeuralNetworks/Ostorhynchus_angustatus/efficientnet-b0/'			# String: neural net used
 keyNames		['Mouth', 'EyeL', 'EyeR', 'FinL', 'FinR', 'Tailstart']
 keyColors		[(255, 0, 0), (0, 255, 0), (80, 80, 255), (80, 255, 80), (255, 80, 80), (255, 100, 100)]
-optimization	'base'		# String: DLC optimization 'base' (tensorflow 2.5) or 'tensorrt' (GPU accelerated) or 'tflite' (CPU only)
+modelType		'pytorch'		# String: DLC model 'pytorch' (latest) or 'base' (tensorflow 2.5)
 pThresh			0.0 		# Minimum value of the inference probability to be considered valid
 
 # Additionnal motion analyses settings (requires runDLC=True except getVelocity)

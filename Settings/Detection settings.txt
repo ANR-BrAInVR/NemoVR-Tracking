@@ -8,11 +8,11 @@ neuralNetDir	'../NeuralNetworks/Clownfish/efficient_net_wide/'			# String: neura
 keyNames		['Nose', 'StripeFront', 'StripeBack', 'TailTip', 'EyeL', 'EyeR', 'FinL', 'FinR']
 keyColors		[(255, 0, 0), (255, 0, 66), (255, 0, 122), (255, 0, 198), (0, 255, 0), (0, 0, 255), (0, 180, 0), (0, 0, 180)]
 modelType		'pytorch'		# String: DLC model 'pytorch' (latest) or 'base' (tensorflow 2.5)
-pThresh			0.0 		# Minimum value of the inference probability to be considered valid
+pThresh			0.2 		# Minimum value of the inference probability to be considered valid
 
 # Additionnal motion analyses settings (requires runDLC=True except getVelocity)
 keyCyclop		['EyeR', 'EyeL', 'Nose'] 		# Keypoints averaged to define cyclop for clownfish, unused 'StripeFront'
-pThreshCyclop	0.005 		# Float: minimum inference probability for Keypoint to be used when averaging to compute cyclop position
+pThreshCyclop	0.1 		# Float: minimum inference probability for Keypoint to be used when averaging to compute cyclop position
 getVelocity		True		# Bool: compute cyclop velocity (3D vector and norm in cm/s)
 getMotionDir	False		# Bool: detects if moving forward (+1), backward (-1) or static (0)
 minFwdSpeed		1			# Float: minimal velocity to be considered moving forward (cm/s)

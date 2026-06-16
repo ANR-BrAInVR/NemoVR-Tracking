@@ -112,11 +112,11 @@ class Tracking:
         self.imgIndexPos3D = mp.Value('l', -1)               # Index of cam0 image from which pos2D has been triangulated
         
         # DLC key variables
-        self.pos2D_cyclop = manager.list([np.zeros(3)] * self.camCount)       # Computed cyclop 2D positions for each camera (needs DLC activated, in full image coordinates)
-        self.pos3D_cyclop = manager.list([np.zeros(4)])                     # Triangulated cyclop 3D positions (X, Y, Z, pMean) (in aquarium coordinates)
+        self.pos2D_cyclop = manager.list([np.zeros(3)] * self.camCount)         # Computed cyclop 2D positions for each camera (needs DLC activated, in full image coordinates)
+        self.pos3D_cyclop = manager.list([np.zeros(4)])                         # Triangulated cyclop 3D positions (X, Y, Z, pMean) (in aquarium coordinates)
         
-        self.pos2Ds_DLC = manager.list([np.zeros((nKeysMax, 3))] * self.camCount)  # 2D positions and confidence (X, Y, p) of each inferred key (in full image coordinates)
-        self.imgIndexes_DLC = manager.list([0] * self.camCount)                 # Index of image from which keys have been inferred
+        self.pos2Ds_DLC = manager.list([np.zeros((nKeysMax, 3))] * self.camCount)   # 2D positions and confidence (X, Y, p) of each inferred key (in full image coordinates)
+        self.imgIndexes_DLC = manager.list([0] * self.camCount)                     # Index of image from which keys have been inferred
         
         # Triangulated DLC inferred keys
         self.pos3Ds_DLC = manager.list([np.zeros((nKeysMax, 4))])    # Triangulated 3D positions (X, Y, Z, pMean) of each inferred pair (in aquarium coordinates)
@@ -301,6 +301,12 @@ class Tracking:
         if self.imgModes[1] == 'full':
             self.log.LogText(2, 'CheckSettings: only upper panel can be in mode \'full\', swapping upper/lower')
             self.imgModes[0], self.imgModes[1] = 'full', self.imgModes[0]
+
+        # If full image requested, mode[1] is 'none'
+        if self.imgModes[0] == 'full' and self.imgModes[1] != 'none':
+            self.log.LogText(2, 'CheckSettings: if upper panel is full, lower panel must be off')
+            self.imgModes[1] == 'none'
+
 
         # If upper is 'none', forcing 'crop'
         if self.imgModes[0] in ['', 'none']:
@@ -514,7 +520,7 @@ class Tracking:
                 imgIndexesPrev[camInd] = self.imgIndexes[camInd]
 
                 # Get last image in the desired format
-                camNb = self.camList[camInd]
+                # camNb = self.camList[camInd]
                 # self.log.LogText(4, 'Monitoring: getting camera %d image %d' % (camNb, self.imgIndexes[camInd]))
                 img = np.copy(self.imgMonits[camInd])   # Get monitoring image
 
@@ -550,16 +556,23 @@ class Tracking:
                     # Adds keys inferred by DLC (with lag when shown in real-time)
                     # self.log.LogText(4, 'Monitoring: add keys inferred by DLC on cam%d' % camNb)
 
-                    posKey = np.copy(self.pos2Ds_DLC[camInd])  # Get tensor flow detected pos2D
+                    # try:
+                    posKey = np.copy(self.pos2Ds_DLC[camInd])  # Get DLC detected pos2D
+
                     for keyInd, keyName in enumerate(self.keyNames):
-                        # Draws circle on inferred key (size depends on probability)
-                        if fullSize:
-                            xKey, yKey = posKey[keyInd, :2].astype(int)
-                        else:
-                            xKey, yKey = posKey[keyInd, :2].astype(int) - self.cropULs[camInd]
-                        rKey = int(keyRadius * np.sqrt(posKey[keyInd, 2]))     # Circles with radius depending on inference confidence
-                        # self.log.LogText(4, 'Monitoring: on cam%d, key [%s] is drawn at (%d, %d) with r=%d' % (camNb, keyName, xKey, yKey, rKey))
-                        img = cv2.circle(img, (xKey, yKey), rKey, self.keyColors[keyInd], thickness=cv2.FILLED)
+                        pPos = np.sqrt(np.sqrt(posKey[keyInd, 2]))
+                        if pPos > 0:
+                            # Draws circle on inferred key (size depends on probability)
+                            if fullSize:
+                                xKey, yKey = posKey[keyInd, :2].astype(int)
+                            else:
+                                xKey, yKey = posKey[keyInd, :2].astype(int) - self.cropULs[camInd]
+                            rKey = int(keyRadius * np.sqrt(posKey[keyInd, 2]))     # Circles with radius depending on inference confidence
+                            # self.log.LogText(4, 'Monitoring: on cam%d, key [%s] is drawn at (%d, %d) with r=%d' % (camNb, keyName, xKey, yKey, rKey))
+                            img = cv2.circle(img, (xKey, yKey), rKey, self.keyColors[keyInd], thickness=cv2.FILLED)
+                    # # except RuntimeWarning as warn:
+                    # except ValueError as warn:
+                    #     self.log.LogText(1, 'Monitoring: Warning:%s with # %s #' % (warn, self.pos2Ds_DLC[camInd]))
 
                 # Resize images when full
                 if fullSize:
@@ -637,7 +650,7 @@ class Tracking:
 
             # Shows image panel
             cv2.imshow(windowName, imgPanel)
-            cv2.moveWindow(windowName, 340, 0)      # TODO: move window but allow user to move it
+            cv2.moveWindow(windowName, 275, 16)      # TODO: move window but allow user to move it
             cv2.waitKey(1)
 
     # TCP server receiving commands from Rendering PC (THREAD)
@@ -1271,7 +1284,7 @@ class Tracking:
                 dlc_live = DLCLive(self.neuralNetDir, model_type='base', tf_config=config, processor=Processor(), display=False)
 
             elif self.modelType == 'pytorch':
-                dlc_live = DLCLive(self.neuralNetDir, model_type='pytorch', processor=Processor(), display=False)
+                dlc_live = DLCLive(self.neuralNetDir, model_type='pytorch', processor=Processor(), display=False, single_animal=True)
 
             # Initialize weights with black image (0 info)
             dlc_live.init_inference(np.zeros(self.imgCropDim, dtype=np.float32))        # self.cropSize for 1 channel
@@ -1316,8 +1329,11 @@ class Tracking:
                         inferredPos[keyInd, 0:2] = -np.ones(2)
 
                 # Stores in shared variable for further triangulation and results saving
-                self.pos2Ds_DLC[camInd] = np.copy(inferredPos)
+                self.pos2Ds_DLC[camInd] = np.copy(inferredPos[:, 0:3])      # DEBUG : now returns 5 per keypoint...
                 self.imgIndexes_DLC[camInd] = imgIndex
+
+                # print(inferredPos)
+                # print(self.pos2Ds_DLC[camInd])
 
                 # Computes cyclop
                 keyAvgValidIndexes = [keyInd for keyInd in keyCyclopInds if self.pos2Ds_DLC[camInd][keyInd, 2] >= self.pThreshCyclop]
@@ -1362,17 +1378,21 @@ class Tracking:
                 A[2*camNb] = pos2D_copy[camInd][0] * P[2] - P[0]        # X
                 A[2*camNb + 1] = pos2D_copy[camInd][1] * P[2] - P[1]    # Y
 
-            # Calls linalg (see book chapter)
-            u, d, vt = np.linalg.svd(A)
+            try:
+                # Calls linalg (see book chapter)
+                u, d, vt = np.linalg.svd(A)
 
-            # Computes pos3D in cameras virtual reference frame (3*1 matrix)
-            pos3Dvirt = vt[-1, 0:3] / vt[-1, 3]
+                # Computes pos3D in cameras virtual reference frame (3*1 matrix)
+                pos3Dvirt = vt[-1, 0:3] / vt[-1, 3]
 
-            # Passes pos3D from virtual to real reference frame
-            newPos3D = np.dot(pMatrix_VirtToReal[:, :3], pos3Dvirt)
-            newPos3D = np.reshape(newPos3D, (3, 1))
-            newPos3D += pMatrix_VirtToReal[:, 3:4]  # Why this? must be in the book...
-            return newPos3D.T[0]
+                # Passes pos3D from virtual to real reference frame
+                newPos3D = np.dot(pMatrix_VirtToReal[:, :3], pos3Dvirt)
+                newPos3D = np.reshape(newPos3D, (3, 1))
+                newPos3D += pMatrix_VirtToReal[:, 3:4]  # Why this? must be in the book...
+                return newPos3D.T[0]
+            except np.linalg.LinAlgError as err:
+                self.log.LogText(2, 'Triangulation: LinAlgError: %s' % err)
+                return -np.ones(3)
 
         def OutOfTank(pos3D_copy, XYlim=11, Zmin=-1, Zmax=20):
             """Check if a triangulated pos3D is out of the tank (with tolerance)"""
@@ -1514,13 +1534,17 @@ class Tracking:
             if self.runDLC.value:
 
                 # Check if one of the indexes of images has changed and if indexes of images are the same
-                if imgIndexesPrev_DLC != self.imgIndexes_DLC[:]:     # and self.imgIndexes_DLC[0] == self.imgIndexes_DLC[1]:
+                if imgIndexesPrev_DLC != self.imgIndexes_DLC[:] and self.imgIndexes_DLC[0] == self.imgIndexes_DLC[1]:
                     imgIndexesPrev_DLC = self.imgIndexes_DLC[:]
 
                     self.log.LogText(3, 'Triangulation (imgIndexes=%s): processing DLC keys' % str(self.imgIndexes))
 
                     # Gets current 2D DLC position list and image index
-                    pos2Ds_DLC_copy = np.copy(self.pos2Ds_DLC)                   # Get copy of inferred positions of all cameras
+                    try:
+                        pos2Ds_DLC_copy = np.copy(self.pos2Ds_DLC)                   # Get copy of inferred positions of all cameras
+                    except ValueError as err:
+                        print('self.pos2Ds_DLC=%s' % self.pos2Ds_DLC)
+
                     imgIndex0_DLC = self.imgIndexes_DLC[0]
 
                     # Temporary keys triangulated var
@@ -1539,7 +1563,10 @@ class Tracking:
                     self.log.LogText(3, 'Triangulation (imgIndexes=%s): processing cyclop' % str(self.imgIndexes))
 
                     # Gets current 2D cyclop position list
-                    pos2D_cyclop_copy = np.copy(self.pos2D_cyclop)           # Get copy of cyclop positions of all cameras
+                    try:
+                        pos2D_cyclop_copy = np.copy(self.pos2D_cyclop)           # Get copy of cyclop positions of all cameras
+                    except ValueError as err:
+                        print('self.pos2D_cyclop=%s' % self.pos2D_cyclop)
 
                     # Temporary cyclop triangulated var
                     pos3D_cyclop_tmp = np.zeros(4)
@@ -1829,8 +1856,8 @@ class UIController(QWidget):
         if UImode:
             self.expID = self_tracking.expID
             self.subjectID = self_tracking.subjectID
-            self.trialID = self_tracking.subjectID
-            self.condID = self_tracking.subjectID
+            self.trialID = self_tracking.trialID
+            self.condID = self_tracking.condID
         self.speciesName = self_tracking.speciesName
         self.runDetect = self_tracking.runDetect
         self.runDLC = self_tracking.runDLC
@@ -1932,8 +1959,8 @@ class UIController(QWidget):
         self.imgModeTxt0 = QLabel('Upper monitoring', self)
         self.imgModeTxt0.setGeometry(posX+20, posY, 120, 30)
         self.imgModeCombo0 = QComboBox(self)
-        self.imgType0 = ['crop', 'diff', 'thresh', 'morph']
-        # self.imgType0 = ['full', 'crop', 'diff', 'thresh', 'morph']
+        # self.imgType0 = ['crop', 'diff', 'thresh', 'morph']
+        self.imgType0 = ['full', 'crop', 'diff', 'thresh', 'morph']
         self.imgModeCombo0.addItems(self.imgType0)
         self.imgModeCombo0.setGeometry(posX + 150, posY, 90, 30)
         self.imgModeCombo0.setCurrentIndex(self.imgType0.index(self.imgModes[0]))
@@ -1946,7 +1973,7 @@ class UIController(QWidget):
         self.imgType1 = ['none', 'crop', 'diff', 'thresh', 'morph']
         self.imgModeCombo1.addItems(self.imgType1)
         self.imgModeCombo1.setGeometry(posX + 150, posY, 90, 30)
-        if not self.runDetect.value:
+        if not self.runDetect.value or self.imgModes[0] == 'full':
             self.imgModeTxt1.setEnabled(False)
             self.imgModeCombo1.setEnabled(False)
             self.imgModes[1] = 'none'
@@ -2101,6 +2128,14 @@ class UIController(QWidget):
 
     def ImgModes(self):
         self.imgModes[:] = [self.imgModeCombo0.currentText(), self.imgModeCombo1.currentText()]
+        if self.imgModes[0] == 'full':
+            self.imgModes[1] = 'none'
+            self.imgModeTxt1.setEnabled(False)
+            self.imgModeCombo1.setEnabled(False)
+            self.imgModeCombo1.setCurrentIndex(self.imgType1.index(self.imgModes[1]))
+        else:
+            self.imgModeTxt1.setEnabled(True)
+            self.imgModeCombo1.setEnabled(True)
 
     def StartExperiment(self):
         # Disable the monitoring when a trial is started

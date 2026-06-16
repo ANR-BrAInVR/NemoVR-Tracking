@@ -1,0 +1,60 @@
+nFish				1		# Int: number of simultaneous fishes in the tank
+
+# Triangulation settings
+excludeOutOfTank	False	# Bool: checks if triangulation results gets out of the tank and replace values with -1
+
+# DLC settings
+neuralNetDir	'../NeuralNetworks/Dascyllus_humbug/DLC_DascyllusAruanus_dlcrnet_stride16_ms5_iteration-0_shuffle-1_snapshot-best-175.pt'		# String: neural net
+keyNames		['Mouth', 'EyeR', 'EyeL', 'Stripe1', 'Stripe2', 'Stripe3', 'Tail']
+keyColors		[(255, 0, 0), (0, 0, 255), (0, 255, 0), (255, 0, 50), (255, 0, 100), (255, 0, 150), (255, 0, 200)]
+modelType		'pytorch'		# String: DLC model 'pytorch' (latest) or 'base' (tensorflow 2.5)
+pThresh			0.0 		# Minimum value of the inference probability to be considered valid
+
+# Additionnal motion analyses settings (requires runDLC=True except getVelocity)
+keyCyclop		['EyeR', 'EyeL', 'Mouth'] 		# Keypoints averaged to define cyclop
+pThreshCyclop	0.005 		# Float: minimum inference probability for Keypoint to be used when averaging to compute cyclop position
+getVelocity		True		# Bool: compute cyclop velocity (3D vector and norm in cm/s)
+getMotionDir	False		# Bool: detects if moving forward (+1), backward (-1) or static (0)
+minFwdSpeed		1			# Float: minimal velocity to be considered moving forward (cm/s)
+minBwdSpeed		1			# Float: minimal velocity to be considered moving backward (cm/s)
+getGazeDir		True		# Bool: computes gaze direction (3D vector defined by two Keypoints)
+keyGazeDir		['Stripe1',  'Mouth']		# Keypoints used to define gaze
+getCurvature	False		# Bool: computes curvature (angle between tail and head in 3D)
+keyCurvature	['Tail', 'Stripe3', 'Stripe1', 'Mouth']		# Keypoints used to define curvature
+
+# Shared detector settings
+nBlobsMax		1			# Int: maximum number of detected blobs reported
+subtractMethod	2			# Int: 0 for absolute diff (all cases), 1 for img-ref (lighter fish), 2 for ref-img (darker fish)
+camThresh		50			# Int: cameras threshold value to isolate fish from background
+maskSize		(4,4)		# Tuple: size of the mask used with morphological filtering
+
+# Simple detector settings
+forceSimpeDetector	True	# Bool: if True, when only 1 fish uses simple detector instead of blob detector
+filter2D		0			# Int: filter to use on 2D detection, 0=none, 1=mean, 2=median (2 not implemented)
+filter2Dsize	3			# Int: size of the sliding window in which filter2D is applyied
+filter3D		2			# Int: filter to use on 3D detection, 0=none, 1=mean, 2=median
+filter3Dsize	5			# Int: size of the sliding window in which filter3D is applyied
+refNframes			18		# Int: number of frames averaged to create reference image
+refFrameSample		10		# Int: sampling rate (take one frame every refFrameSample)
+
+# Blob detector settings
+blobDetectMode	'diff'		# String: image processed by blob detector: 'diff', 'thresh' or 'morph'
+thresholdStep		5		# (default 10)
+minThreshold		15		# (default 50)
+maxThreshold		100		# (default 220)
+minRepeatability	2		# (default 2)
+minDistBetweenBlobs	20		# Float: minimal distance between blobs (in px, default 10)
+filterByColor		True	# Bool: separate using color information (default True)
+blobColor			255		# Int: from 0 (darker blobs) to 255 (brighter blobs) (Default 0)
+filterByArea		True	# Bool: use area to filter blobls detected (default True)
+minArea				15		# Float: minimim area (px2, default 25)
+maxArea				1000	# Float: maximum area (px2, default 5000)
+filterByCircularity	False	# Bool: use circularity to filter blobs detected (default False)
+minCircularity		0.8		# Float: minimum circularity (default 0.8)
+maxCircularity		10000	# Float: maximum circularity (default float max)
+filterByInertia		False	# Bool: use inertia ratio to filter blobs detected (default True)
+minInertiaRatio		0.05	# Float: minimum inertia (default 0.1)
+maxInertiaRatio		20		# Float: maximum inertia (default float max)
+filterByConvexity	False	# Bool: use convexity to filter blobs detected (default True)
+minConvexity		0.1		# Float: minimum convexity (default 0.95)
+maxConvexity		1		# Float: maximum convexity (default float)

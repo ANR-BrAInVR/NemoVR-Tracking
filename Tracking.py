@@ -551,7 +551,7 @@ class Tracking:
                     # self.log.LogText(4, 'Monitoring: add keys inferred by DLC on cam%d' % camNb)
 
                     posKey = np.copy(self.pos2Ds_DLC[camInd])  # Get tensor flow detected pos2D
-                    for keyInd, keyName in enumerate(self.keynames):
+                    for keyInd, keyName in enumerate(self.keyNames):
                         # Draws circle on inferred key (size depends on probability)
                         if fullSize:
                             xKey, yKey = posKey[keyInd, :2].astype(int)
@@ -1268,15 +1268,13 @@ class Tracking:
                 # - tf_config : configuration définie juste au dessus (limitation mémoire)
                 # - processor : Processor() (peut être redéfini pour ajouter du filtrage prédictif par exemple)
                 # - display : pour tracer des points (pas encore trouvé comment, pas utilisé)
-                dlc_live = DLCLive(self.neuralNetDir, model_type='base', tf_config=config, processor=Processor, display=False)
+                dlc_live = DLCLive(self.neuralNetDir, model_type='base', tf_config=config, processor=Processor(), display=False)
 
             elif self.modelType == 'pytorch':
-                print('\nSTART\n')
-                dlc_live = DLCLive(self.neuralNetDir, model_type='pytorch', processor=Processor, display=False)
-                print('\nDONE\n')
+                dlc_live = DLCLive(self.neuralNetDir, model_type='pytorch', processor=Processor(), display=False)
 
             # Initialize weights with black image (0 info)
-            dlc_live.init_inference(np.zeros(self.imgCropDim))        # self.cropSize for 1 channel
+            dlc_live.init_inference(np.zeros(self.imgCropDim, dtype=np.float32))        # self.cropSize for 1 channel
 
         # DLC threaded inference
         def DLC_Inference(self, camInd, dlc_live):
@@ -1595,7 +1593,7 @@ class Tracking:
                     dt2D.extend([('pos(%d)_cam%d' % (fishInd, camInd), 'f8', 2)])
             if self.runDLC.value:
                 dt2D.extend([('pos(Cyclop)_cam%d' % camInd, 'f8', 2), ('proba(Cyclop)_cam%d' % camInd, 'f8')])
-                for keyName in self.keynames:
+                for keyName in self.keyNames:
                     dt2D.extend([('pos(%s)_cam%d' % (keyName, camInd), 'f8', 2), ('proba(%s)_cam%d' % (keyName, camInd), 'f8')])
         dt2D = np.dtype(dt2D)
 
@@ -1617,14 +1615,14 @@ class Tracking:
                 dt3D.extend([('gazeDir', 'f8', 3)])
             if self.getCurvature:
                 dt3D.extend([('curvature', 'f8')])
-            for keyName in self.keynames:
+            for keyName in self.keyNames:
                 dt3D.extend([('pos(%s)' % keyName, 'f8', 3), ('proba(%s)' % keyName, 'f8')])
 
             # DLC inferred Markers vars
             if self.getGazeDir:
-                keyGazeDirInds = [list(self.keynames).index(keyName) for keyName in self.keyGazeDir]
+                keyGazeDirInds = [list(self.keyNames).index(keyName) for keyName in self.keyGazeDir]
             if self.getCurvature:
-                keyCurvatureInds = [list(self.keynames).index(keyName) for keyName in self.keyCurvature]
+                keyCurvatureInds = [list(self.keyNames).index(keyName) for keyName in self.keyCurvature]
         dt3D = np.dtype(dt3D)
 
         while True:
@@ -1689,7 +1687,7 @@ class Tracking:
                             res2D['pos(UL)_cam%d' % camInd][fInd] = self.cropULs[camInd]
                             res2D['pos(Cyclop)_cam%d' % camInd][fInd] = self.pos2D_cyclop[camInd][:2]  # X, Y (pos2D) of cyclop
                             res2D['proba(Cyclop)_cam%d' % camInd][fInd] = self.pos2D_cyclop[camInd][2]  # pMean of cyclop
-                            for keyInd, keyName in enumerate(self.keynames):
+                            for keyInd, keyName in enumerate(self.keyNames):
                                 res2D['pos(%s)_cam%d' % (keyName, camInd)][fInd] = self.pos2Ds_DLC[camInd][keyInd, :2]      # X, Y (pos2D) of key keyInd
                                 res2D['proba(%s)_cam%d' % (keyName, camInd)][fInd] = self.pos2Ds_DLC[camInd][keyInd, 2]     # pMean of key keyInd
 
@@ -1720,7 +1718,7 @@ class Tracking:
                             res3D['imgIndex'][fInd] = fInd
                             res3D['pos(Cyclop)'][fInd] = self.pos3D_cyclop[0][:3]  # X, Y, Z (pos3D) of cyclop
                             res3D['proba(Cyclop)'][fInd] = self.pos3D_cyclop[0][3]  # pMean of cyclop
-                            for keyInd, keyName in enumerate(self.keynames):
+                            for keyInd, keyName in enumerate(self.keyNames):
                                 res3D['pos(%s)' % keyName][fInd] = self.pos3Ds_DLC[0][keyInd, :3]      # X, Y, Z (pos3D) of key keyInd
                                 res3D['proba(%s)' % keyName][fInd] = self.pos3Ds_DLC[0][keyInd, 3]     # pMean of key keyInd
                             if self.getVelocity and fInd > 0:
@@ -1859,7 +1857,7 @@ class UIController(QWidget):
         self.panel = QLabel(self)
 
         # General aspect of the window
-        self.setFixedSize(270, 700 if UImode else 400)
+        self.setFixedSize(260, 710 if UImode else 390)
         self.move(10, 10)
         self.setWindowTitle('Tracking UI')
         self.show()
@@ -1875,10 +1873,10 @@ class UIController(QWidget):
         self.speciesNameTxt.setGeometry(posX+20, posY, 120, 30)
         self.speciesNameCombo = QComboBox(self)
         self.speciesNameCombo.addItems(self.settings.speciesNameList)
-        self.speciesNameCombo.setGeometry(posX + 150, posY, 90, 30)
+        self.speciesNameCombo.setGeometry(posX + 70, posY, 150, 30)
         self.speciesNameCombo.setCurrentIndex(self.settings.speciesNameList.index(self.speciesName.value))
         self.speciesNameCombo.currentIndexChanged.connect(self.SpeciesNames)
-        posY += 35
+        posY += 45
         # Run detection
         self.runDetectBtn = QPushButton('Simple detect', self)
         self.runDetectBtn.setGeometry(posX, posY, 120, 30)

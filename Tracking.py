@@ -650,7 +650,7 @@ class Tracking:
 
             # Shows image panel
             cv2.imshow(windowName, imgPanel)
-            cv2.moveWindow(windowName, 275, 16)      # TODO: move window but allow user to move it
+            cv2.moveWindow(windowName, 285, 16)      # TODO: move window but allow user to move it
             cv2.waitKey(1)
 
     # TCP server receiving commands from Rendering PC (THREAD)
@@ -828,7 +828,7 @@ class Tracking:
             xiCam.set_gain(self.gain)
             xiCam.set_param('recent_frame', 0)
             xiCam.set_acq_timing_mode('XI_ACQ_TIMING_MODE_FRAME_RATE')
-            xiCam.set_param('framerate', self.framerate)
+            xiCam.set_framerate(self.framerate)
             # xiCam.set_acq_transport_buffer_commit(32)
             # xiCam.set_acq_buffer_size(xiCam.get_acq_buffer_size_maximum())
             xiCam.set_imgdataformat('XI_RGB24')

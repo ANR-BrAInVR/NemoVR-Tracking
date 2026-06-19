@@ -459,7 +459,7 @@ class Tracking:
         windowName = 'Images %s' % ('(with DLC)' if self.runDLC.value else '')
         cv2.namedWindow(windowName, cv2.WINDOW_GUI_NORMAL | cv2.WINDOW_AUTOSIZE)
 
-        imgIndexesPrev = [-1] * self.camCount
+        imgIndexesPrev = [self.imgIndexes[camInd]-1 for camInd in range(self.camCount)]
 
         # Prepares target panel
         fullSize = self.imgModes[0] == 'full'
@@ -495,6 +495,7 @@ class Tracking:
             missedCount = 0
             updatedCamCount = 0
             perfStr = ''
+            dtPerf = (1 // (1/self.framerate)) * (1/self.framerate)
 
         while True:
 
@@ -633,12 +634,13 @@ class Tracking:
                 missed /= updatedCamCount
                 t1 = time.perf_counter()
                 missedCount += missed
-                if t1 - tPerf > 1:
+                if t1 - tPerf > dtPerf:
                     # Every one second, estimates processed frames
                     percent = 100 * (self.framerate - missedCount) / self.framerate
-                    perfStr = 'Performance: processed %.f/%.1f frames (%.1f%%)' % (self.framerate - missedCount, self.framerate, percent)
+                    perfStr = 'Processing at %.1ffps (%.1f%%)' % (self.framerate - missedCount, percent)
+                    # perfStr = 'Performance: processed %.1f/%.1f frames (%.1f%%)' % (self.framerate - missedCount, self.framerate, percent)
                     missedCount = 0
-                    tPerf = t1
+                    tPerf += dtPerf
                 missed = 0
                 updatedCamCount = 0
                 imgPanel = cv2.putText(imgPanel, perfStr, (10, 20), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])

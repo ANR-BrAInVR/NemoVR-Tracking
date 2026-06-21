@@ -831,6 +831,7 @@ class Tracking:
             xiCam.set_param('recent_frame', 0)
             xiCam.set_acq_timing_mode('XI_ACQ_TIMING_MODE_FRAME_RATE')
             xiCam.set_framerate(self.framerate)
+            xiCam.enable_auto_wb()
             # xiCam.set_acq_transport_buffer_commit(32)
             # xiCam.set_acq_buffer_size(xiCam.get_acq_buffer_size_maximum())
             xiCam.set_imgdataformat('XI_RGB24')

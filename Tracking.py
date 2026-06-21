@@ -1870,6 +1870,8 @@ class UIController(QWidget):
         self.sendPos3D = self_tracking.sendPos3D
         self.saveResults = self_tracking.saveResults
         self.imgModes = self_tracking.imgModes
+        self.stopRequest = self_tracking.stopRequest
+        self.quit = self_tracking.quit
 
         self.settings = self_tracking.settings
         self.self_tracking = self_tracking

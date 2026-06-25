@@ -1,5 +1,5 @@
 logLevel		2				# Int: log verbose level of Tracking (0-4)
-controller		'UI'			# String: 'UE' for Unreal Engine (other PC) or 'UI' for user interface (this PC)
+controller		'UE'			# String: 'UE' for Unreal Engine (other PC) or 'UI' for user interface (this PC)
 
 # Detection modes and visualization
 speciesName		'Dascyllus_humbug'		# String: name of the fish species to be tracked
@@ -9,6 +9,7 @@ triangulate		True			# Bool: triangulates 2D positions of cameras to get 3D posit
 showPos2D		False			# Bool: show animal tracking, needs either runDetect or runDLC enabled
 showDLC			True			# Bool: show DLC on cropped images, needs tracking and runDLC activated
 sendPos3D		True			# Bool: send 3D positions to Unreal based on detection or DLC (needs triangulate enabled)
+recvStim3D		True			# Bool: receives a list with the 3D positions/orientations of the events
 useCyclop		True			# Bool: use triangulated cyclop instead of detected positions when sending 3D positions (needs runDLC qnd getCyclop enabled)
 imgModes		['crop', 'none']	# List of 2 strings: image monitoring modes for upper and lower images ('full', 'crop', 'diff', 'thresh', 'morph', 'none')
 

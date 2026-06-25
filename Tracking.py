@@ -42,7 +42,8 @@ from PyQt5.QtWidgets import *
 
 # IPs and communication ports (warning: ports indexed by camNb not camInd)
 IP = {'Tracking': '192.168.0.2', 'Rendering': '192.168.0.1'}
-UDPserverRendering = (IP['Rendering'], 50771)
+UDPclientRendering = (IP['Rendering'], 50771)
+UDPserverRenderingPort = 50772
 TCPserverTracking = (IP['Tracking'], 65432)
 UDPpacketSize = 65000   # Size of UDP packets
 TCPpacketSize = 4096    # Size of TCP packets
@@ -51,10 +52,13 @@ TCPpacketSize = 4096    # Size of TCP packets
 imgWidth, imgHeight = 1280, 1024
 
 # DLC key variables
-nKeysMax = 20  # Maximal number of keys detected by DLC
-keyRadius = 3  # Maximal radius size of the keys for monitoring (when inference p=1)
-cyclopRadius = 4  # Maximal radius size of cyclop for monitoring (when inference p=1)
-cyclopColor = 0  # Detection or cyclop key center color (white)
+nKeysMax = 20       # Maximum number of keys detected by DLC
+keyRadius = 3       # Maximum radius size of the keys for monitoring (when inference p=1)
+cyclopRadius = 4    # Maximum radius size of cyclop for monitoring (when inference p=1)
+cyclopColor = 0     # Detection or cyclop key center color (white)
+
+# UE stimulus event related
+nEventsMax = 10     # Maximum number of events that can be sent back to results
 
 # Stores all possible pair combinations, between cameras (triangulation) or from one camera frame to the next (identification)
 pairLists = []
@@ -139,6 +143,7 @@ class Tracking:
         self.showDLC = mp.Value('B', self.settings.showDLC)
         self.useCyclop = mp.Value('B', self.settings.useCyclop)
         self.sendPos3D = mp.Value('B', self.settings.sendPos3D)
+        self.recvStim3D = mp.Value('B', self.settings.recvStim3D)
         self.saveResults = mp.Value('B', self.settings.saveResults)
         self.imgModes = manager.list(self.settings.imgModes)       # Image monitoring modes (2 max among full, crop, thresh, morph depending on detector)
 
@@ -260,6 +265,7 @@ class Tracking:
             self.useCyclop.value = self.settings.useCyclop
             self.showDLC.value = self.settings.showDLC
             self.sendPos3D.value = self.settings.sendPos3D
+            self.recvStim3D.value = self.settings.recvStim3D
             self.imgModes[:] = self.settings.imgModes
             self.saveResults.value = self.settings.saveResults
 
@@ -288,9 +294,11 @@ class Tracking:
                 self.log.LogText(2, 'CheckSettings: triangulation requested but only one camera is active, ignoring')
                 self.triangulate.value = False
                 self.sendPos3D.value = False
+                self.recvStim3D.value = False
 
         if self.nFish > 1:
             self.sendPos3D.value = False
+            self.recvStim3D.value = False
 
         if not self.runDLC.value:
             self.useCyclop.value = False
@@ -333,6 +341,7 @@ class Tracking:
             self.showPos2D.value = False
             self.showDLC.value = False
             self.sendPos3D.value = False
+            self.recvStim3D.value = False
             self.imgModes[0] = 'crop'
             self.imgModes[1] = 'none'
 
@@ -351,6 +360,7 @@ class Tracking:
                 self.log.LogText(2, 'CheckSettings: triangulation requested but only one camera is active, ignoring')
                 self.triangulate.value = False
                 self.sendPos3D.value = False
+                self.recvStim3D.value = False
 
         # If multiple fish
         if self.nFish > 1:
@@ -1421,7 +1431,9 @@ class Tracking:
             BuildPairList(range(self.nBlobsMax), 0, [])
 
         # Starts connection with Rendering PC
-        UDPServerSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        UDPclientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        UDPserverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        UDPserverSocket.bind(('', UDPserverRenderingPort))
 
         # Initializes sliding window of filter3D
         if self.filter3D != 0:
@@ -1434,7 +1446,7 @@ class Tracking:
 
             if self.stopRequest.value:
                 self.log.LogText(1, 'Triangulation: stop request received, process ending')
-                UDPServerSocket.close()
+                UDPclientSocket.close()
                 return
 
             # Triangulates detected 2D positions
@@ -1600,11 +1612,16 @@ class Tracking:
                     posUDP = np.median(pos3Dslide, 1)
 
                 # Send data
-                message = '%.3f,%.3f,%.3f' % tuple(posUDP)
-                UDPServerSocket.sendto(message.encode(), UDPserverRendering)
-                self.log.LogText(3, 'Triangulation: message sent to Rendering \'%s\' (imgIndex0=%d)' % (message, imgIndexesPrev[0]))
+                msgOut = '%.3f,%.3f,%.3f' % tuple(posUDP)
+                UDPclientSocket.sendto(msgOut.encode(), UDPclientRendering)
+                self.log.LogText(3, 'Triangulation: msgOut sent to Rendering \'%s\' (imgIndex0=%d)' % (msgOut, imgIndexesPrev[0]))
 
                 updatePosUDP = False
+
+                if self.recvStim3D.value:
+                    msgIn = UDPserverSocket.recv(UDPpacketSize).decode()
+                    self.log.LogText(3, 'Triangulation: msgIn received \'%s\' (imgIndex0=%d)' % (msgIn, imgIndexesPrev[0]))
+
 
     # Save results: detected center pos2D and DLC keys (for all cameras), and pos3D triangulations (PROCESS)
     def SaveResults(self, maxDuration=3600):
@@ -1869,6 +1886,7 @@ class UIController(QWidget):
         self.showDLC = self_tracking.showDLC
         self.useCyclop = self_tracking.useCyclop
         self.sendPos3D = self_tracking.sendPos3D
+        self.recvStim3D = self_tracking.recvStim3D
         self.saveResults = self_tracking.saveResults
         self.imgModes = self_tracking.imgModes
         self.stopRequest = self_tracking.stopRequest
@@ -1889,7 +1907,7 @@ class UIController(QWidget):
         self.panel = QLabel(self)
 
         # General aspect of the window
-        self.setFixedSize(260, 710 if UImode else 390)
+        self.setFixedSize(260, 710 if UImode else 440)
         self.move(10, 10)
         self.setWindowTitle('Tracking UI')
         self.show()
@@ -1947,18 +1965,25 @@ class UIController(QWidget):
         posY += 45
         # Run triangulation
         self.triangulateBtn = QPushButton('Triangulate', self)
-        self.triangulateBtn.setGeometry(posX, posY, 120, 30)
+        self.triangulateBtn.setGeometry(posX, posY, 80, 30)
         self.triangulateBtn.setCheckable(True)
         self.triangulateBtn.setChecked(self.triangulate.value)
         self.triangulateBtn.setEnabled(self.runDetect.value or self.runDLC.value)
         self.triangulateBtn.clicked.connect(self.Triangulate)
         # Send 3D position to Unreal
-        self.sendPos3DBtn = QPushButton('Send 3D pos', self)
-        self.sendPos3DBtn.setGeometry(posX + 120, posY, 120, 30)
+        self.sendPos3DBtn = QPushButton('Send fish', self)
+        self.sendPos3DBtn.setGeometry(posX + 80, posY, 80, 30)
         self.sendPos3DBtn.setCheckable(True)
         self.sendPos3DBtn.setEnabled(self.triangulate.value)
         self.sendPos3DBtn.setChecked(self.sendPos3D.value)
         self.sendPos3DBtn.clicked.connect(self.SendPos3D)
+        # Receive stimulus 3D pos/rot from Unreal
+        self.recvStim3DBtn = QPushButton('Receive stim', self)
+        self.recvStim3DBtn.setGeometry(posX + 160, posY, 80, 30)
+        self.recvStim3DBtn.setCheckable(True)
+        self.recvStim3DBtn.setEnabled(self.sendPos3D.value)
+        self.recvStim3DBtn.setChecked(self.recvStim3D.value)
+        self.recvStim3DBtn.clicked.connect(self.RecvStim3D)
         posY += 40
         # Image Mode selection
         self.imgModeTxt0 = QLabel('Upper monitoring', self)
@@ -2296,6 +2321,10 @@ class UIController(QWidget):
 
     def SendPos3D(self):
         self.sendPos3D.value = self.sendPos3DBtn.isChecked()
+        self.recvStim3DBtn.setEnabled(self.sendPos3D.value)
+
+    def RecvStim3D(self):
+        self.recvStim3D.value = self.recvStim3DBtn.isChecked()
 
     def LoadSettings(self):
         self.SendCommandTCPTracking('loadSettings')

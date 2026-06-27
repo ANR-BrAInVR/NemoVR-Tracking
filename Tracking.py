@@ -36,8 +36,8 @@ import re
 import csv
 from ctypes import c_wchar_p
 import numpy as np
-from ximea import xiapi
 import cv2
+from ximea import xiapi
 from PyQt5.QtWidgets import *
 
 # IPs and communication ports (warning: ports indexed by camNb not camInd)
@@ -58,7 +58,7 @@ cyclopRadius = 4    # Maximum radius size of cyclop for monitoring (when inferen
 cyclopColor = 0     # Detection or cyclop key center color (white)
 
 # UE stimulus event related
-nEventsMax = 10     # Maximum number of events that can be sent back to results
+nEventsMax = 4     # Maximum number of events that can be sent back to results
 
 # Stores all possible pair combinations, between cameras (triangulation) or from one camera frame to the next (identification)
 pairLists = []
@@ -123,9 +123,16 @@ class Tracking:
         self.imgIndexes_DLC = manager.list([0] * self.camCount)                     # Index of image from which keys have been inferred
         
         # Triangulated DLC inferred keys
-        self.pos3Ds_DLC = manager.list([np.zeros((nKeysMax, 4))])    # Triangulated 3D positions (X, Y, Z, pMean) of each inferred pair (in aquarium coordinates)
-        self.imgIndexPos3D_DLC = mp.Value('l', -1)                # Index of cam0 image from which DLC keys have been inferred
-        
+        self.pos3Ds_DLC = manager.list([np.zeros((nKeysMax, 4))])                   # Triangulated 3D positions (X, Y, Z, pMean) of each inferred pair (in aquarium coordinates)
+        self.imgIndexPos3D_DLC = mp.Value('l', -1)              # Index of cam0 image from which DLC keys have been inferred
+
+        # Rendering returned event infos
+        self.timeRendering = mp.Value('f', 0.0)
+        self.posTracked = manager.list([np.zeros(3)])                       # 3D positions (X, Y, Z) of focal fish returned by rendering PC
+        self.posEvents = manager.list([np.zeros((nEventsMax, 3))])          # 3D positions (X, Y, Z) of each event (in aquarium coordinates)
+        self.rotEvents = manager.list([np.zeros((nEventsMax, 3))])          # 3D rotations (rX, rY, rZ) of each event (in aquarium coordinates)
+        self.nEvents = manager.Value('H', 0)                 # Number of actual events to update
+
         # Trial infos for results directory and filename of results, and to update UI
         self.expID = manager.Value(c_wchar_p, 'exp')
         self.subjectID = manager.Value(c_wchar_p, 'subj')
@@ -143,7 +150,7 @@ class Tracking:
         self.showDLC = mp.Value('B', self.settings.showDLC)
         self.useCyclop = mp.Value('B', self.settings.useCyclop)
         self.sendPos3D = mp.Value('B', self.settings.sendPos3D)
-        self.recvStim3D = mp.Value('B', self.settings.recvStim3D)
+        self.recvEventPos = mp.Value('B', self.settings.recvEventPos)
         self.saveResults = mp.Value('B', self.settings.saveResults)
         self.imgModes = manager.list(self.settings.imgModes)       # Image monitoring modes (2 max among full, crop, thresh, morph depending on detector)
 
@@ -265,7 +272,7 @@ class Tracking:
             self.useCyclop.value = self.settings.useCyclop
             self.showDLC.value = self.settings.showDLC
             self.sendPos3D.value = self.settings.sendPos3D
-            self.recvStim3D.value = self.settings.recvStim3D
+            self.recvEventPos.value = self.settings.recvEventPos
             self.imgModes[:] = self.settings.imgModes
             self.saveResults.value = self.settings.saveResults
 
@@ -294,11 +301,11 @@ class Tracking:
                 self.log.LogText(2, 'CheckSettings: triangulation requested but only one camera is active, ignoring')
                 self.triangulate.value = False
                 self.sendPos3D.value = False
-                self.recvStim3D.value = False
+                self.recvEventPos.value = False
 
         if self.nFish > 1:
             self.sendPos3D.value = False
-            self.recvStim3D.value = False
+            self.recvEventPos.value = False
 
         if not self.runDLC.value:
             self.useCyclop.value = False
@@ -341,7 +348,7 @@ class Tracking:
             self.showPos2D.value = False
             self.showDLC.value = False
             self.sendPos3D.value = False
-            self.recvStim3D.value = False
+            self.recvEventPos.value = False
             self.imgModes[0] = 'crop'
             self.imgModes[1] = 'none'
 
@@ -360,7 +367,7 @@ class Tracking:
                 self.log.LogText(2, 'CheckSettings: triangulation requested but only one camera is active, ignoring')
                 self.triangulate.value = False
                 self.sendPos3D.value = False
-                self.recvStim3D.value = False
+                self.recvEventPos.value = False
 
         # If multiple fish
         if self.nFish > 1:
@@ -391,6 +398,11 @@ class Tracking:
         for camInd in range(self.camCount):
             videoCaptureProcs[camInd].start()
         processList.extend(videoCaptureProcs)
+
+        if self.recvEventPos.value:
+            # Starts UDP server to receive commands from Rendering PC
+            UDPserverThread = threading.Thread(target=self.UDPserver, args=())
+            UDPserverThread.start()
 
         # Waits that all video processing processes are acquiring from cameras
         t0 = time.perf_counter()
@@ -658,7 +670,7 @@ class Tracking:
             # Add retained triangulation value
             if self.triangulate.value:
                 tpos3D = tuple(self.pos3D_cyclop[0][:3]) if self.useCyclop.value else tuple(self.pos3Ds[0][0, :])
-                imgPanel = cv2.putText(imgPanel, 'Triangulation (%.1f, %.1f, %.1f)' % tpos3D, (imgMonitDim0[1]-100, imgMonitDim0[0]-10), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
+                imgPanel = cv2.putText(imgPanel, 'Fish position (%.1f, %.1f, %.1f)' % tpos3D, (imgMonitDim0[1]-100, imgMonitDim0[0]-10), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
 
             # Shows image panel
             cv2.imshow(windowName, imgPanel)
@@ -1404,14 +1416,14 @@ class Tracking:
                 newPos3D += pMatrix_VirtToReal[:, 3:4]  # Why this? must be in the book...
                 return newPos3D.T[0]
             except np.linalg.LinAlgError as err:
-                self.log.LogText(2, 'Triangulation: LinAlgError: %s' % err)
+                self.log.LogText(3, 'Triangulation: LinAlgError: %s' % err)
                 return -np.ones(3)
 
-        def OutOfTank(pos3D_copy, XYlim=11, Zmin=-1, Zmax=20):
+        def OutOfTank(pos3D_copy):
             """Check if a triangulated pos3D is out of the tank (with tolerance)"""
 
             if self.excludeOutOfTank:
-                return np.abs(pos3D_copy[0]) > XYlim or np.abs(pos3D_copy[1]) > XYlim or pos3D_copy[2] > Zmax or pos3D_copy[2] < Zmin  # In cm
+                return np.abs(pos3D_copy[0]) > self.XYmax or np.abs(pos3D_copy[1]) > self.XYmax or pos3D_copy[2] > self.Zmax or pos3D_copy[2] < self.Zmin  # In cm
             else:
                 return False
 
@@ -1432,8 +1444,6 @@ class Tracking:
 
         # Starts connection with Rendering PC
         UDPclientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        UDPserverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        UDPserverSocket.bind(('', UDPserverRenderingPort))
 
         # Initializes sliding window of filter3D
         if self.filter3D != 0:
@@ -1614,14 +1624,64 @@ class Tracking:
                 # Send data
                 msgOut = '%.3f,%.3f,%.3f' % tuple(posUDP)
                 UDPclientSocket.sendto(msgOut.encode(), UDPclientRendering)
-                self.log.LogText(3, 'Triangulation: msgOut sent to Rendering \'%s\' (imgIndex0=%d)' % (msgOut, imgIndexesPrev[0]))
+                self.log.LogText(3, 'Triangulation: msgOut sent to Rendering \'%s\' (imgIndexe0=%d)' % (msgOut, self.imgIndexes[0]))
 
                 updatePosUDP = False
 
-                if self.recvStim3D.value:
-                    msgIn = UDPserverSocket.recv(UDPpacketSize).decode()
-                    self.log.LogText(3, 'Triangulation: msgIn received \'%s\' (imgIndex0=%d)' % (msgIn, imgIndexesPrev[0]))
 
+    # UDP server to receive event's positions and orientations from rendering
+    def UDPserver(self):
+
+        self.log.LogText(1, 'UDPserver() thread running (waiting for Rendering event positions/orientations)')
+
+        UDPserverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        UDPserverSocket.bind(('', UDPserverRenderingPort))
+        UDPserverSocket.setblocking(False)      # Alternative : UDPserverSocket.settimeout(0)
+
+        # Empty buffer
+        try:
+            while len(UDPserverSocket.recv(UDPpacketSize)) == 0: pass
+        except socket.error:
+            pass
+
+        while True:
+
+            # Quits on stopRequest
+            if self.stopRequest.value or self.quit.value:
+                self.log.LogText(1, 'UDPserver: %s requested' % 'stop request' if self.stopRequest.value else 'quit')
+                return
+
+            try:
+                msgIn = UDPserverSocket.recv(UDPpacketSize).decode()
+                self.log.LogText(3, 'UDPserver: msgIn received \'%s\'' % msgIn)
+                textList = msgIn.split('\t')
+                textInd = 0
+                nEvents = 0
+                while textInd < len(textList):
+                    if textList[textInd] == 'Time':
+                        textInd += 1
+                        self.timeRendering.value = float(textList[textInd])
+                        # print('self.timeRendering.value = %f' % self.timeRendering.value)           # DEBUG
+                        textInd += 1
+                    elif textList[textInd] == 'Tracked':
+                        textInd += 1
+                        exec('self.posTracked[0]=np.array(%s)' % textList[textInd])
+                        # print('self.posTracked[0] = %s' % self.posTracked[0])                       # DEBUG
+                        textInd += 1
+                    elif 'Event' in textList[textInd]:
+                        eventInd = int(textList[textInd][-1])
+                        textInd += 1
+                        exec('self.posEvents[%d]=np.array(%s)' % (eventInd, textList[textInd]))
+                        # print('self.posEvents[%d] = %s' % (eventInd, self.posEvents[eventInd]))     # DEBUG
+                        textInd += 1
+                        exec('self.rotEvents[%d]=np.array(%s)' % (eventInd, textList[textInd]))
+                        textInd += 1
+                        nEvents += 1
+                    else:
+                        textInd += 1
+                self.nEvents.value = nEvents
+            except socket.error:
+                pass
 
     # Save results: detected center pos2D and DLC keys (for all cameras), and pos3D triangulations (PROCESS)
     def SaveResults(self, maxDuration=3600):
@@ -1670,6 +1730,14 @@ class Tracking:
                 keyGazeDirInds = [list(self.keyNames).index(keyName) for keyName in self.keyGazeDir]
             if self.getCurvature:
                 keyCurvatureInds = [list(self.keyNames).index(keyName) for keyName in self.keyCurvature]
+
+        if self.recvEventPos.value:
+            dt3D.extend([('timeRendering', 'f8')])
+            dt3D.extend([('pos(tracked)', 'f8', 3)])
+            for eventInd in range(nEventsMax):
+                dt3D.extend([('pos(event%d)' % eventInd, 'f8', 3)])
+                dt3D.extend([('rot(event%d)' % eventInd, 'f8', 3)])
+
         dt3D = np.dtype(dt3D)
 
         while True:
@@ -1757,6 +1825,16 @@ class Tracking:
                                 else:
                                     res3D['vel(0)'][fInd] = -1
                                     res3D['velNorm(0)'][fInd] = -1
+                            # Feedback from rendering computer (if runDLC is false)
+                            if self.recvEventPos.value and not self.runDLC.value:
+                                res3D['timeRendering'][fInd] = self.timeRendering.value
+                                res3D['pos(tracked)'][fInd] = self.posTracked[0]
+                                for eventInd in range(self.nEvents.value):
+                                    res3D['pos(event%d)' % eventInd][fInd] = self.posEvents[eventInd]
+                                    res3D['rot(event%d)' % eventInd][fInd] = self.rotEvents[eventInd]
+                                for eventInd in range(self.nEvents.value, nEventsMax):
+                                    res3D['pos(event%d)' % eventInd][fInd] = np.zeros(3)
+                                    res3D['rot(event%d)' % eventInd][fInd] = np.zeros(3)
                     if self.runDLC.value:
                         if self.imgIndexPos3D_DLC.value != imgIndexPos3DPrev_DLC:
                             imgIndexPos3DPrev_DLC = self.imgIndexPos3D_DLC.value
@@ -1803,6 +1881,16 @@ class Tracking:
                                     # res3D['curvature'][fInd] = np.arcsin(np.linalg.norm(np.cross(vTail, vHead)) / np.linalg.norm(vTail) / np.linalg.norm(vHead)) * 180.0 / np.pi
                                 else:
                                     res3D['curvature'][fInd] = -1
+                            # Feedback from rendering computer (if runDLC is false)
+                            if self.recvEventPos.value:
+                                res3D['timeRendering'][fInd] = self.timeRendering.value
+                                res3D['pos(tracked)'][fInd] = self.posTracked[0]
+                                for eventInd in range(self.nEvents.value):
+                                    res3D['pos(event%d)' % eventInd][fInd] = self.posEvents[eventInd]
+                                    res3D['rot(event%d)' % eventInd][fInd] = self.rotEvents[eventInd]
+                                for eventInd in range(self.nEvents.value, nEventsMax):
+                                    res3D['pos(event%d)' % eventInd][fInd] = np.zeros(3)
+                                    res3D['rot(event%d)' % eventInd][fInd] = np.zeros(3)
 
             elif dataRecordingPrev:
                 # At trial end: stores arrays (append writing mode)
@@ -1886,7 +1974,7 @@ class UIController(QWidget):
         self.showDLC = self_tracking.showDLC
         self.useCyclop = self_tracking.useCyclop
         self.sendPos3D = self_tracking.sendPos3D
-        self.recvStim3D = self_tracking.recvStim3D
+        self.recvEventPos = self_tracking.recvEventPos
         self.saveResults = self_tracking.saveResults
         self.imgModes = self_tracking.imgModes
         self.stopRequest = self_tracking.stopRequest
@@ -1978,12 +2066,12 @@ class UIController(QWidget):
         self.sendPos3DBtn.setChecked(self.sendPos3D.value)
         self.sendPos3DBtn.clicked.connect(self.SendPos3D)
         # Receive stimulus 3D pos/rot from Unreal
-        self.recvStim3DBtn = QPushButton('Receive stim', self)
-        self.recvStim3DBtn.setGeometry(posX + 160, posY, 80, 30)
-        self.recvStim3DBtn.setCheckable(True)
-        self.recvStim3DBtn.setEnabled(self.sendPos3D.value)
-        self.recvStim3DBtn.setChecked(self.recvStim3D.value)
-        self.recvStim3DBtn.clicked.connect(self.RecvStim3D)
+        self.recvEventPos3DBtn = QPushButton('Receive events', self)
+        self.recvEventPos3DBtn.setGeometry(posX + 160, posY, 80, 30)
+        self.recvEventPos3DBtn.setCheckable(True)
+        self.recvEventPos3DBtn.setEnabled(self.sendPos3D.value)
+        self.recvEventPos3DBtn.setChecked(self.recvEventPos.value)
+        self.recvEventPos3DBtn.clicked.connect(self.RecvEventPos)
         posY += 40
         # Image Mode selection
         self.imgModeTxt0 = QLabel('Upper monitoring', self)
@@ -2321,10 +2409,10 @@ class UIController(QWidget):
 
     def SendPos3D(self):
         self.sendPos3D.value = self.sendPos3DBtn.isChecked()
-        self.recvStim3DBtn.setEnabled(self.sendPos3D.value)
+        self.recvEventPos3DBtn.setEnabled(self.sendPos3D.value)
 
-    def RecvStim3D(self):
-        self.recvStim3D.value = self.recvStim3DBtn.isChecked()
+    def RecvEventPos(self):
+        self.recvEventPos.value = self.recvEventPos3DBtn.isChecked()
 
     def LoadSettings(self):
         self.SendCommandTCPTracking('loadSettings')
@@ -2387,7 +2475,7 @@ class Log:
     def __init__(self, logLevel=int, showTime=True, __output=''):
         """Use output='' for console writing"""
 
-        # self.__lock = mp.Lock()          # threading.Lock()
+        self.__lock = mp.Lock()          # threading.Lock()
         self.logLevel = logLevel
         self.showTime = showTime
         if showTime:
@@ -2401,7 +2489,7 @@ class Log:
 
     def __del__(self):  # Called when destroying object
 
-        # del self.__lock
+        del self.__lock
         if self.__outToFile:
             sys.stdout.flush()
             sys.stdout = self.__stdoutCopy
@@ -2409,13 +2497,13 @@ class Log:
     def LogText(self, level, text):
 
         if self.logLevel >= level:
-            # self.__lock.acquire()
+            self.__lock.acquire()
             if self.showTime:
                 t = float(time.time_ns() - self.startTime) / 1E9
                 print('%10.6f\t' % t + '  ' * (level - 1) + text)
             else:
                 print('  ' * (level - 1) + text)
-            # self.__lock.release()
+            self.__lock.release()
 
 
 # Starts everything (if this is the main process)
@@ -2425,8 +2513,8 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     # Multi-processing settings
-    mp.set_start_method('spawn')
-    mp.freeze_support()
+    # mp.set_start_method('spawn')
+    # mp.freeze_support()
 
     # Start tracking
     myTracking = Tracking()

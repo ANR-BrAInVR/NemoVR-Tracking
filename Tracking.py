@@ -2069,9 +2069,10 @@ class UIController(QWidget):
         self.recvEventPos3DBtn = QPushButton('Receive events', self)
         self.recvEventPos3DBtn.setGeometry(posX + 160, posY, 80, 30)
         self.recvEventPos3DBtn.setCheckable(True)
-        self.recvEventPos3DBtn.setEnabled(self.sendPos3D.value)
-        self.recvEventPos3DBtn.setChecked(self.recvEventPos.value)
-        self.recvEventPos3DBtn.clicked.connect(self.RecvEventPos)
+        self.recvEventPos3DBtn.setEnabled(False)        # To block feature
+        # self.recvEventPos3DBtn.setEnabled(self.sendPos3D.value)
+        # self.recvEventPos3DBtn.setChecked(self.recvEventPos.value)
+        # self.recvEventPos3DBtn.clicked.connect(self.RecvEventPos)
         posY += 40
         # Image Mode selection
         self.imgModeTxt0 = QLabel('Upper monitoring', self)

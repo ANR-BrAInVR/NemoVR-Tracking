@@ -66,7 +66,6 @@ pairLists = []
 class Settings:
     owner = None
 
-GUIprocess = None
 
 # Tracking that detects 2D positions of fish for each camera, triangulates and runs DLC on cropped images
 class Tracking:
@@ -304,7 +303,6 @@ class Tracking:
 
         if self.nFish > 1:
             self.sendPos3D.value = False
-            self.recvEventPos.value = False
 
         if not self.runDLC.value:
             self.useCyclop.value = False
@@ -347,7 +345,6 @@ class Tracking:
             self.showPos2D.value = False
             self.showDLC.value = False
             self.sendPos3D.value = False
-            self.recvEventPos.value = False
             self.imgModes[0] = 'crop'
             self.imgModes[1] = 'none'
 
@@ -366,7 +363,6 @@ class Tracking:
                 self.log.LogText(2, 'CheckSettings: triangulation requested but only one camera is active, ignoring')
                 self.triangulate.value = False
                 self.sendPos3D.value = False
-                self.recvEventPos.value = False
 
         # If multiple fish
         if self.nFish > 1:
@@ -399,7 +395,7 @@ class Tracking:
         processList.extend(videoCaptureProcs)
 
         if self.recvEventPos.value:
-            # Starts UDP server to receive commands from Rendering PC
+            # Starts UDP server to receive event's position and rotation from Rendering PC
             UDPserverThread = threading.Thread(target=self.UDPserver, args=())
             UDPserverThread.start()
 
@@ -2067,14 +2063,14 @@ class UIController(QWidget):
         self.triangulateBtn.setEnabled(self.runDetect.value or self.runDLC.value)
         self.triangulateBtn.clicked.connect(self.Triangulate)
         # Send 3D position to Unreal
-        self.sendPos3DBtn = QPushButton('Send fish', self)
+        self.sendPos3DBtn = QPushButton('Send cyclop', self)
         self.sendPos3DBtn.setGeometry(posX + 80, posY, 80, 30)
         self.sendPos3DBtn.setCheckable(True)
         self.sendPos3DBtn.setEnabled(self.triangulate.value)
         self.sendPos3DBtn.setChecked(self.sendPos3D.value)
         self.sendPos3DBtn.clicked.connect(self.SendPos3D)
         # Receive stimulus 3D pos/rot from Unreal
-        self.recvEventPos3DBtn = QPushButton('Receive events', self)
+        self.recvEventPos3DBtn = QPushButton('Receive stim', self)
         self.recvEventPos3DBtn.setGeometry(posX + 160, posY, 80, 30)
         self.recvEventPos3DBtn.setCheckable(True)
         # self.recvEventPos3DBtn.setEnabled(False)        # To block feature

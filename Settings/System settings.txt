@@ -1,5 +1,6 @@
 logLevel		2				# Int: log verbose level of Tracking (0-4)
 controller		'UE'			# String: 'UE' for Unreal Engine (other PC) or 'UI' for user interface (this PC)
+runLocal		False           # Bool: run UDP and TCP on localhost, used for debugging
 
 # Detection modes and visualization
 speciesName		'Dascyllus_aruanus'		# String: name of the fish species to be tracked

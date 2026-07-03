@@ -5,7 +5,6 @@ Created on Mon May 11 12:30:45 2022
 @authors: Manuel
 
 TODO:
-- move the UI into the Tracking class so that you don't have to readdress the MP tools
 - TCP server multi-client...
 + multi-animal triangulation and the identification problem:
  (-) reuse last valid combination first, probably works for the next frame (not necessary with nFish==1)
@@ -42,13 +41,11 @@ from PyQt5.QtWidgets import *
 
 # IPs and communication ports (warning: ports indexed by camNb not camInd)
 IP = {'Tracking': '192.168.0.2', 'Rendering': '192.168.0.1', 'localhost':'127.0.0.1'}
-UDPclientRendering = (IP['Rendering'], 50771)
-# UDPclientRendering = (IP['localhost'], 50771)     # For local debug
-UDPserverRenderingPort = 50772
-TCPserverTracking = (IP['Tracking'], 65432)
-# TCPserverTracking = (IP['localhost'], 65432)      # For local debug
-UDPpacketSize = 65000   # Size of UDP packets
-TCPpacketSize = 4096    # Size of TCP packets
+UDPclientPort_Rendering = 50771
+UDPserverPort_Rendering = 50772
+TCPserverPort_Tracking = 65432
+UDPpacketSize = 1024    # Size of UDP packets
+TCPpacketSize = 1024    # Size of TCP packets
 
 # Image global settings (color images)
 imgWidth, imgHeight = 1280, 1024
@@ -687,10 +684,13 @@ class Tracking:
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as serverSocket:
 
+            TCPserver_Tracking = (IP['Tracking'], TCPserverPort_Tracking) if not self.settings.runLocal \
+                else (IP['localhost'], TCPserverPort_Tracking)      # For local debug
+
             # Binds TCP server to the correct port
             while True:
                 try:
-                    serverSocket.bind(TCPserverTracking)
+                    serverSocket.bind(TCPserver_Tracking)
                 except socket.error as errorMsg:
                     self.log.LogText(2, 'TCPserver: could not bind with server address, retrying in 1s')
                     time.sleep(1)
@@ -703,7 +703,7 @@ class Tracking:
             while True:
 
                 # Waits for client to connect
-                self.log.LogText(2, 'TCPserver: listening on %s...' % str(TCPserverTracking))
+                self.log.LogText(2, 'TCPserver: listening on %s...' % str(TCPserver_Tracking))
                 serverSocket.listen()
                 try:
                     clientSocket, clientAddress = serverSocket.accept()
@@ -1446,6 +1446,8 @@ class Tracking:
 
         # Starts connection with Rendering PC
         UDPclientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        UDPclient_Rendering = (IP['Rendering'], UDPclientPort_Rendering) if not self.settings.runLocal \
+            else (IP['localhost'], UDPclientPort_Rendering)     # For local debug
 
         # Initializes sliding window of filter3D
         if self.filter3D != 0:
@@ -1624,8 +1626,8 @@ class Tracking:
                     posUDP = np.median(pos3Dslide, 1)
 
                 # Send data
-                msgOut = '%.3f,%.3f,%.3f' % tuple(posUDP)
-                UDPclientSocket.sendto(msgOut.encode(), UDPclientRendering)
+                msgOut = '%.5f,%.5f,%.5f' % tuple(posUDP)
+                UDPclientSocket.sendto(msgOut.encode(), UDPclient_Rendering)
                 self.log.LogText(3, 'Triangulation: msgOut sent to Rendering \'%s\' (imgIndexe0=%d)' % (msgOut, self.imgIndexes[0]))
 
                 updatePosUDP = False
@@ -1637,7 +1639,7 @@ class Tracking:
         self.log.LogText(1, 'UDPserver() thread running (waiting for Rendering event positions/orientations)')
 
         UDPserverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        UDPserverSocket.bind(('', UDPserverRenderingPort))
+        UDPserverSocket.bind(('', UDPserverPort_Rendering))
         UDPserverSocket.setblocking(False)      # Alternative : UDPserverSocket.settimeout(0)
 
         # Empty buffer
@@ -2455,9 +2457,12 @@ class UIController(QWidget):
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as clientSocket:
 
+            TCPserver_Tracking = (IP['Tracking'], TCPserverPort_Tracking) if not self.settings.runLocal \
+                else (IP['localhost'], TCPserverPort_Tracking)      # For local debug
+
             # Connects to TCP server on Tracking
             try:
-                clientSocket.connect(TCPserverTracking)
+                clientSocket.connect(TCPserver_Tracking)
             except socket.error as errorMsg:
                 self.log.LogText(2, 'SendCommandTCPTracking: Connection error: %s' % errorMsg)
                 return 0

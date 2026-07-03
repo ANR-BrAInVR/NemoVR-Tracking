@@ -1,13 +1,18 @@
 nFish				1		# Int: number of simultaneous fishes in the tank
 
 # Triangulation settings
-excludeOutOfTank	False	# Bool: checks if triangulation results gets out of the tank and replace values with -1
+excludeOutOfTank	True	# Bool: checks if triangulation results gets out of the tank and replace values with -1
+XYmax			11			# Float: maximum value of X to be considered within tank
+Zmin			-1			# Float: minimum value of Z to be considered within tank
+Zmax			17			# Float: maximum value of Z to be considered within tank
+filter3D		2			# Int: filter to use on 3D detection, 0=none, 1=mean, 2=median
+filter3Dsize	3			# Int: size of the sliding window in which filter3D is applyied before sending cyclop
 
 # DLC settings
 neuralNetDir	'../NeuralNetworks/Pomacentrus_pavo/efficientnet-b0/'			# String: neural net used
 keyNames		['Mouth', 'EyeL', 'EyeR', 'FinL', 'FinR', 'Tailstart', 'Tailtip']
 keyColors		[(255, 0, 0), (0, 255, 0), (80, 80, 255), (80, 255, 80), (255, 80, 80), (255, 60, 60), (255, 120, 120)]
-optimization	'base'		# String: DLC optimization 'base' (tensorflow 2.5) or 'tensorrt' (GPU accelerated) or 'tflite' (CPU only)
+modelType		'pytorch'		# String: DLC model 'pytorch' (latest) or 'base' (tensorflow 2.5)
 pThresh			0.0 		# Minimum value of the inference probability to be considered valid
 
 # Additionnal motion analyses settings (requires runDLC=True except getVelocity)
@@ -32,8 +37,6 @@ maskSize		(4,4)		# Tuple: size of the mask used with morphological filtering
 forceSimpeDetector	True	# Bool: if True, when only 1 fish uses simple detector instead of blob detector
 filter2D		0			# Int: filter to use on 2D detection, 0=none, 1=mean, 2=median (2 not implemented)
 filter2Dsize	3			# Int: size of the sliding window in which filter2D is applyied
-filter3D		2			# Int: filter to use on 3D detection, 0=none, 1=mean, 2=median
-filter3Dsize	5			# Int: size of the sliding window in which filter3D is applyied
 refNframes			18		# Int: number of frames averaged to create reference image
 refFrameSample		10		# Int: sampling rate (take one frame every refFrameSample)
 

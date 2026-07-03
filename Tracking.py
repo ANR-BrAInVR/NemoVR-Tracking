@@ -41,10 +41,12 @@ from ximea import xiapi
 from PyQt5.QtWidgets import *
 
 # IPs and communication ports (warning: ports indexed by camNb not camInd)
-IP = {'Tracking': '192.168.0.2', 'Rendering': '192.168.0.1'}
+IP = {'Tracking': '192.168.0.2', 'Rendering': '192.168.0.1', 'localhost':'127.0.0.1'}
 UDPclientRendering = (IP['Rendering'], 50771)
+# UDPclientRendering = (IP['localhost'], 50771)     # For local debug
 UDPserverRenderingPort = 50772
 TCPserverTracking = (IP['Tracking'], 65432)
+# TCPserverTracking = (IP['localhost'], 65432)      # For local debug
 UDPpacketSize = 65000   # Size of UDP packets
 TCPpacketSize = 4096    # Size of TCP packets
 
@@ -129,8 +131,8 @@ class Tracking:
         # Rendering returned event infos
         self.timeRendering = mp.Value('f', 0.0)
         self.posTracked = manager.list([np.zeros(3)])                       # 3D positions (X, Y, Z) of focal fish returned by rendering PC
-        self.posEvents = manager.list([np.zeros((nEventsMax, 3))])          # 3D positions (X, Y, Z) of each event (in aquarium coordinates)
-        self.rotEvents = manager.list([np.zeros((nEventsMax, 3))])          # 3D rotations (rX, rY, rZ) of each event (in aquarium coordinates)
+        self.posEvents = manager.list([np.zeros(3)] * nEventsMax)          # 3D positions (X, Y, Z) of each event (in aquarium coordinates)
+        self.rotEvents = manager.list([np.zeros(3)] * nEventsMax)          # 3D rotations (rX, rY, rZ) of each event (in aquarium coordinates)
         self.nEvents = manager.Value('H', 0)                 # Number of actual events to update
 
         # Trial infos for results directory and filename of results, and to update UI
@@ -883,7 +885,7 @@ class Tracking:
 
             # Quits on stopRequest
             if self.stopRequest.value or self.quit.value:
-                self.log.LogText(1, 'VideoCapture(%d): %s requested' % (camNb, 'stop request' if self.stopRequest.value else 'quit'))
+                self.log.LogText(1, 'VideoCapture(%d): %s received, ending process' % (camNb, 'stop request' if self.stopRequest.value else 'quit'))
                 self.acquiring[camInd] = False
                 self.dataRecording.value = False     # Sends signal to stop data recording (in case)
                 if not dataRecordingPrev:
@@ -1086,7 +1088,7 @@ class Tracking:
 
             # Quits on stopRequest
             if self.stopRequest.value or self.quit.value:
-                self.log.LogText(1, 'RunDetect(%d): %s requested' % (camNb, 'stop request' if self.stopRequest.value else 'quit'))
+                self.log.LogText(1, 'RunDetect(%d): %s received, process ending' % (camNb, 'stop request' if self.stopRequest.value else 'quit'))
                 self.acquiring[camInd] = False
                 self.dataRecording.value = False     # Sends signal to stop data recording (in case)
                 if not dataRecordingPrev:
@@ -1644,11 +1646,13 @@ class Tracking:
         except socket.error:
             pass
 
+        from ast import literal_eval
+
         while True:
 
             # Quits on stopRequest
             if self.stopRequest.value or self.quit.value:
-                self.log.LogText(1, 'UDPserver: %s requested' % 'stop request' if self.stopRequest.value else 'quit')
+                self.log.LogText(1, 'UDPserver: %s received, thread ending' % 'stop request' if self.stopRequest.value else 'quit')
                 return
 
             try:
@@ -1665,21 +1669,23 @@ class Tracking:
                         textInd += 1
                     elif textList[textInd] == 'Tracked':
                         textInd += 1
-                        exec('self.posTracked[0]=np.array(%s)' % textList[textInd])
+                        self.posTracked[0] = np.array(literal_eval(textList[textInd]))
                         # print('self.posTracked[0] = %s' % self.posTracked[0])                       # DEBUG
                         textInd += 1
                     elif 'Event' in textList[textInd]:
-                        eventInd = int(textList[textInd][-1])
+                        eventInd = int(textList[textInd][-1])-1
                         textInd += 1
-                        exec('self.posEvents[%d]=np.array(%s)' % (eventInd, textList[textInd]))
-                        # print('self.posEvents[%d] = %s' % (eventInd, self.posEvents[eventInd]))     # DEBUG
+                        self.posEvents[eventInd] = np.array(literal_eval(textList[textInd]))
+                        # print('self.posEvents[%d] = np.array(%s) = %s' % (eventInd, textList[textInd], self.posEvents[eventInd]))     # DEBUG
                         textInd += 1
-                        exec('self.rotEvents[%d]=np.array(%s)' % (eventInd, textList[textInd]))
+                        self.rotEvents[eventInd] = np.array(literal_eval(textList[textInd]))
+                        # print('self.rotEvents[%d] = np.array(%s) = %s' % (eventInd, textList[textInd], self.rotEvents[eventInd]))     # DEBUG
                         textInd += 1
                         nEvents += 1
                     else:
                         textInd += 1
                 self.nEvents.value = nEvents
+
             except socket.error:
                 pass
 
@@ -2069,10 +2075,10 @@ class UIController(QWidget):
         self.recvEventPos3DBtn = QPushButton('Receive events', self)
         self.recvEventPos3DBtn.setGeometry(posX + 160, posY, 80, 30)
         self.recvEventPos3DBtn.setCheckable(True)
-        self.recvEventPos3DBtn.setEnabled(False)        # To block feature
-        # self.recvEventPos3DBtn.setEnabled(self.sendPos3D.value)
-        # self.recvEventPos3DBtn.setChecked(self.recvEventPos.value)
-        # self.recvEventPos3DBtn.clicked.connect(self.RecvEventPos)
+        # self.recvEventPos3DBtn.setEnabled(False)        # To block feature
+        self.recvEventPos3DBtn.setEnabled(self.sendPos3D.value)
+        self.recvEventPos3DBtn.setChecked(self.recvEventPos.value)
+        self.recvEventPos3DBtn.clicked.connect(self.RecvEventPos)
         posY += 40
         # Image Mode selection
         self.imgModeTxt0 = QLabel('Upper monitoring', self)

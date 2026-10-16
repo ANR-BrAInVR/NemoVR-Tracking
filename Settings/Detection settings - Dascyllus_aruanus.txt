@@ -9,7 +9,7 @@ filter3D		2			# Int: filter to use on 3D detection, 0=none, 1=mean, 2=median
 filter3Dsize	3			# Int: size of the sliding window in which filter3D is applyied before sending cyclop
 
 # DLC settings
-neuralNetDir	'../NeuralNetworks/Dascyllus_aruanus/DLC_Dascyllus_aruanus_dlcrnet_stride16_ms5_iteration-0_shuffle-1_snapshot-best-150.pt'		# String: neural net
+neuralNetDir	'../NeuralNetworks/Dascyllus_aruanus/DLC_Dascyllus_aruanus_dlcrnet_stride16_ms5_iteration-0_shuffle-1_snapshot-best-200.pt'		# String: neural net
 keyNames		['Snout', 'Bar1F', 'Bar1B', 'Bar2F', 'Bar2B', 'Bar3F', 'Bar3B', 'TailF', 'TailB' ]
 keyColors		[(255, 0, 0), (255, 0, 25), (255, 0, 50), (255, 0, 75), (255, 0, 100), (255, 0, 125), (255, 0, 150), (255, 0, 175), (255, 0, 200)]
 modelType		'pytorch'	# String: DLC model 'pytorch' (latest) or 'base' (tensorflow 2.5)
@@ -18,7 +18,7 @@ pThresh			0.0 		# Minimum value of the inference probability to be considered va
 # Additionnal motion analyses settings (requires runDLC=True except getVelocity)
 keyCyclop		['Bar1F']	# Keypoints averaged to define cyclop
 pThreshCyclop	0.3 		# Float: minimum inference probability for Keypoint to be used when averaging to compute cyclop position
-getVelocity		False		# Bool: compute cyclop velocity (3D vector and norm in cm/s)
+getVelocity		True		# Bool: compute cyclop velocity (3D vector and norm in cm/s)
 getMotionDir	True		# Bool: detects if moving forward (+1), backward (-1) or static (0)
 minFwdSpeed		0.5			# Float: minimal velocity to be considered moving forward (cm/s)
 minBwdSpeed		0.5			# Float: minimal velocity to be considered moving backward (cm/s)

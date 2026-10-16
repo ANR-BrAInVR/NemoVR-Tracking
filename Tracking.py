@@ -473,7 +473,7 @@ class Tracking:
 
         self.log.LogText(1, 'Monitoring() called as main thread')
 
-        windowName = 'Images %s' % ('(with DLC)' if self.runDLC.value else '')
+        windowName = 'Videos %s' % ('(with DLC)' if self.runDLC.value else '')
         cv2.namedWindow(windowName, cv2.WINDOW_GUI_NORMAL | cv2.WINDOW_AUTOSIZE)
 
         imgIndexesPrev = [self.imgIndexes[camInd]-1 for camInd in range(self.camCount)]
@@ -613,9 +613,13 @@ class Tracking:
                     img = cv2.putText(img, 'Mode=\'%s\'' % self.imgModes[0], (imgMonitDim0[1] - 120, 20), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
 
                 # Add camera detection infos
+                text = 'Cam%d' % camInd
+                xText = 10 if camInd == 0 else imgMonitDim0[1]-50
                 if self.triangulate.value and self.nFish == 1:
-                    xText = 10 if camInd == 0 else imgMonitDim0[1]-200
-                    img = cv2.putText(img, 'Cam%d (%d fish detected)' % (camInd, self.nFishDetect2D[camInd]), (xText, imgMonitDim0[0]-10), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
+                    text += ' (%d fish detected)' % self.nFishDetect2D[camInd]
+                    if camInd == 0:
+                        xText -= 150
+                img = cv2.putText(img, text, (xText, imgMonitDim0[0]-10), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=textColor[0])
 
                 # Places updated image in 2-images upper panel (for monitoring)
                 imgPanel[:imgMonitDim0[0], camInd*imgMonitDim0[1]:(camInd+1)*imgMonitDim0[1]] = img
@@ -669,7 +673,7 @@ class Tracking:
 
             # Shows image panel
             cv2.imshow(windowName, imgPanel)
-            cv2.moveWindow(windowName, 285, 16)      # TODO: move window but allow user to move it
+            cv2.moveWindow(windowName, 285, 20)      # TODO: move window but allow user to move it
             cv2.waitKey(1)
 
     # TCP server receiving commands from Rendering PC (THREAD)

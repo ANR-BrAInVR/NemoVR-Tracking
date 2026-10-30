@@ -1,7 +1,7 @@
 nFish				1		# Int: number of simultaneous fishes in the tank
 
 # Triangulation settings
-excludeOutOfTank	False	# Bool: checks if triangulation results gets out of the tank and replace values with -1
+excludeOutOfTank	True	# Bool: checks if triangulation results gets out of the tank and replace values with -1
 XYmax			6			# Float: maximum value of X to be considered within tank (10x10)
 Zmin			-1			# Float: minimum value of Z to be considered within tank (10x10)
 Zmax			14			# Float: maximum value of Z to be considered within tank (10x10)
@@ -11,7 +11,7 @@ filter3Dsize	3			# Int: size of the sliding window in which filter3D is applyied
 # DLC settings
 neuralNetDir	'../NeuralNetworks/Labroides_Dimidiatus/DLC_Labroides_Dimidiatus_NetType.RESNET_50_iteration-0_shuffle-1_snapshot-best-100.pt'		# String: neural net
 keyNames		['Nose', 'EyeL', 'EyeR', 'DorsalF', 'DorsalM', 'DorsalB', 'TailTip']
-keyColors		[(255, 0, 0), (255, 0, 25), (255, 0, 50), (255, 0, 75), (255, 0, 100), (255, 0, 125), (255, 0, 150), (255, 0, 175), (255, 0, 200)]
+keyColors		[(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 0, 50), (255, 0, 100), (255, 0, 150), (255, 0, 200)]
 modelType		'pytorch'	# String: DLC model 'pytorch' (latest) or 'base' (tensorflow 2.5)
 pThresh			0.0 		# Minimum value of the inference probability to be considered valid
 
